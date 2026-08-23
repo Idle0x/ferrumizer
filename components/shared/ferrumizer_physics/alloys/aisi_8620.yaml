@@ -1,0 +1,52 @@
+# AISI 8620 — chromium-molybdenum-nickel carburizing gear steel.
+# Provenance per field (build plan N1: all constants traceable).
+alloy: aisi_8620
+name: "AISI 8620 (Cr-Mo-Ni carburizing steel)"
+
+composition_wt_pct:
+  C: 0.19       # 0.17-0.22 typical
+  Mn: 0.45      # 0.35-0.60
+  Cr: 0.40      # 0.35-0.65
+  Mo: 0.25      # 0.15-0.30
+  Ni: 0.55      # 0.40-0.70
+
+# --- initial state ---------------------------------------------------------
+C0: 0.2         # core carbon content, mass-% (as-received bar stock)
+
+# --- diffusion parameters --------------------------------------------------
+# D(T) = D0 * exp(-Q / (R T)) for carbon in austenite.
+# Literature activation-energy spread ~120-156 kJ/mol [S3]; 137 kJ/mol is
+# the mid value. D0 is the classical gamma-Fe prefactor (~0.2 cm^2/s),
+# paired with Q so that D(950 C) ~ 2e-11 m^2/s (see ADR-001).
+D0: 2.2e-5      # m^2/s
+Q: 137000.0     # J/mol
+
+# --- phase-transformation constants (hardening stage) ----------------------
+km_alpha: 0.011  # K^-1, Koistinen-Marburger constant [S5]
+jmak:
+  # JMAK exponent and rate constants, representative of low-alloy CCT data.
+  n: 2.0
+  k_pearlite: 8.50e-09   # s^n, at ~700 C
+  k_bainite: 1.80e-10    # s^n, at ~550 C
+
+# --- hardness mixing rule (smoothstep — never clamp, stays C^1) -----------
+hardness:
+  Hcore: 230     # HV0.3, water-quenched low-C core martensite
+  Hmax: 650      # HV0.3, ~1.0 mass-% C equivalent surface martensite
+  Cmin: 0.5      # mass-% C below which H ~ Hcore
+  Cideal: 1.0    # mass-% C at which H reaches Hmax
+
+# --- ECD (effective case depth, ISO 2639:2002 practice @ 550 HV) [S6] ------
+ecd_threshold_hv: 550.0
+
+# --- Andrews (1965) Ms(C) = A - b_C * C (K, C in mass-%) [S5] --------------
+ms:
+  A: 833.0       # K (~560 C for zero carbon, Andrews line)
+  b_carbon: 240.0   # K per mass-% C
+
+# --- thermal properties (950-1050 C austenite, handbook ranges) ------------
+thermal:
+  k: 42.0        # W/(m K)
+  rho: 7800.0    # kg/m^3
+  cp: 700.0      # J/(kg K)
+  T_init: 298.15 # K (25 C)

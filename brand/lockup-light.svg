@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 220">
+  <defs><radialGradient id="field-l" cx="34%" cy="68%" r="88%"><stop offset="0" stop-color="#C8A76E"/><stop offset=".26" stop-color="#A05F30"/><stop offset=".55" stop-color="#5D3320"/><stop offset=".82" stop-color="#2B2723"/><stop offset="1" stop-color="#1D1F23"/></radialGradient></defs>
+  <rect width="640" height="220" fill="#F3F0EA"/>
+  <g transform="translate(80 10)">
+<path d="M 165.05 34.95 A 92 92 0 1 1 131.47 13.55" fill="none" stroke="#23262A" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="100" cy="100" r="74" fill="none" stroke="#23262A" stroke-opacity=".85" stroke-width="1.3"/>
+    <circle cx="100" cy="100" r="58" fill="url(#field-l)" stroke="#23262A" stroke-width="1.3"/>
+    <path d="M 42 142 C 58 138 73 126 84 110 C 89.5 104.5 99 100.5 105.37 95.52 C 106.0 100.0 103.5 103.0 101.25 104.36 C 95.4 107.2 90.5 105.5 89.64 97.01 C 88.0 90.2 95.5 85.5 101.25 89.64 C 106.5 84.5 110.5 78.0 110.0 70.0 C 122 69 141 70.8 157 72.5" fill="none" stroke="#D6B57C" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 43 115 H 157" fill="none" stroke="#EFE6CF" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="3 5" stroke-linecap="round"/>
+  </g>
+  <text x="322" y="117" fill="#23262A" font-family="'Inter','SF Pro Text','Segoe UI','Helvetica Neue',Arial,sans-serif" font-size="54" font-weight="600" letter-spacing=".5">ferrumizer</text>
+  <text x="324" y="149" fill="#23262A" fill-opacity=".6" font-family="'Inter','SF Pro Text','Segoe UI','Helvetica Neue',Arial,sans-serif" font-size="16" font-weight="400" letter-spacing="1.3">Gradients through the furnace</text>
+</svg>

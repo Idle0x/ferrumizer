@@ -1,0 +1,23 @@
+alloy: 8620
+geometry: slab
+size_mm: 16.0
+t_total: 7200.0
+schedule:
+  times: [0.0, 7200.0]
+  temps_C: [950.0, 950.0]
+thermal:
+  n: 21
+  sample_every: 20
+carbon:
+  n: 81
+  dt: 2.0
+  sample_every: 300
+  mode: dirichlet
+params:
+  D0: 2.2e-5
+  Q_kJ: 137.0
+  C_pot: 1.0
+  h_m: 1.0e-4
+  eps: 0.8
+observations:
+  traverse_csv: ../literature/aisi_8620/traverse.csv

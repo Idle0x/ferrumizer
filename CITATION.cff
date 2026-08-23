@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+title: "ferrumizer: Gradients through the furnace"
+message: "If you use Ferrumizer, please cite this repository."
+type: software
+authors:
+  - family-names: Ferrumizer
+    given-names: Team
+    affiliation: "Open-source project"
+version: 0.1.0
+date-released: 2026-08-22
+license: Apache-2.0
+repository-code: https://github.com/example/ferrumizer
+abstract: >-
+  Differentiable gas-carburizing heat-treatment pipeline spanning furnace
+  thermal history, carbon diffusion, phase transformation, hardness, and
+  effective case depth.

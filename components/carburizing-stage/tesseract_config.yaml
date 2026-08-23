@@ -1,0 +1,24 @@
+name: "carburizing-stage"
+version: "0.1.0"
+description: |
+  Ferrumizer carburizing stage: 1-D carbon diffusion with Arrhenius D(T).
+  Legacy-by-design NumPy FD solver for the forward pass; gradient endpoints
+  use parameter-space finite differences (jacobian) and a JAX twin (jvp/vjp).
+
+metadata:
+  gradient_strategy: finite_difference_parameter_space
+  gradient_strategy_note: >
+    The jacobian endpoint uses central finite differences over scalar process
+    parameters (D0, Q, C_pot, h_m) — this stands in for un-autodiffable
+    commercial process software. The jvp/vjp endpoints use a numerically
+    identical JAX twin so that end-to-end gradients can cross this container
+    boundary during composition. Cross-AD agreement is verified in V4.
+  stage: carburizing
+  project: ferrumizer
+
+build_config:
+  base_image: "debian:bookworm-slim"
+  python_version: "3.12"
+  target_platform: "native"
+  package_data:
+    - ["../shared/ferrumizer_physics", "/tesseract/ferrumizer_physics"]

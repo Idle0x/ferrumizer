@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+results/
+.DS_Store
+dist/
+*.egg-info/
+
+# Internal planning/build documents (private, not for the public repo)
+BUILD_PLAN.md
+PRODUCT_SPEC.md
+brand/BUILD_SPEC.md
+media/
+
+# Tool caches and built output
+site/
+.mypy_cache/
+.ruff_cache/

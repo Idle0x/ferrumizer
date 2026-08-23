@@ -1,0 +1,18 @@
+name: "hardening-stage"
+version: "0.1.0"
+description: |
+  Ferrumizer hardening stage: Scheil-additivity JMAK, Koistinen-Marburger
+  martensite, Andrews Ms(C), smoothstep hardness mixing, and ISO 2639
+  effective case depth at 550 HV. Fully differentiable (JAX).
+
+metadata:
+  gradient_strategy: autodiff
+  stage: hardening
+  project: ferrumizer
+
+build_config:
+  base_image: "debian:bookworm-slim"
+  python_version: "3.12"
+  target_platform: "native"
+  package_data:
+    - ["../shared/ferrumizer_physics", "/tesseract/ferrumizer_physics"]

@@ -1,0 +1,31 @@
+site_name: ferrumizer
+site_description: Gradients through the furnace
+site_url: https://example.github.io/ferrumizer
+repo_name: ferrumizer
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: custom
+    accent: amber
+  font:
+    text: Inter
+    code: JetBrains Mono
+nav:
+  - Home: index.md
+  - Physics: physics.md
+  - Architecture: architecture.md
+  - Verification: verification.md
+  - Calibration guide: calibration.md
+  - Design guide: design.md
+  - CLI reference: cli.md
+  - API reference: api.md
+  - Gallery: gallery.md
+  - Decision records:
+      - ADR-001 carbon-diffusion prefactor: adr/ADR-001-carbon-diffusion-prefactor.md
+      - ADR-002 calibration surrogate: adr/ADR-002-calibration-surrogate.md
+  - Roadmap: roadmap.md
+extra_css:
+  - stylesheets/extra.css
+plugins:
+  - search

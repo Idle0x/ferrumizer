@@ -1,0 +1,49 @@
+# AISI 5120 — chromium carburizing steel (lower hardenability than 8620).
+# Provenance per field (build plan N1: all constants traceable).
+alloy: aisi_5120
+name: "AISI 5120 (Cr carburizing steel)"
+
+composition_wt_pct:
+  C: 0.20       # 0.17-0.22
+  Mn: 0.75      # 0.60-0.90
+  Cr: 0.90      # 0.70-0.90
+  Mo: 0.0       # not specified
+  Ni: 0.0       # not specified
+
+# --- initial state ---------------------------------------------------------
+C0: 0.2         # core carbon content, mass-%
+
+# --- diffusion parameters --------------------------------------------------
+# Carbon diffusion in austenite; plain Cr steels close to the 8620 family.
+# Calibration prior spans [100,200] kJ/mol [S3].
+D0: 2.2e-5      # m^2/s (classical gamma-Fe prefactor)
+Q: 137000.0     # J/mol (137 kJ/mol, mid literature spread)
+
+# --- phase-transformation constants (hardening stage) ----------------------
+km_alpha: 0.011  # K^-1, Koistinen-Marburger constant [S5]
+jmak:
+  n: 2.0
+  k_pearlite: 1.20e-08   # s^n at 700 C (less alloying -> faster pearlite)
+  k_bainite: 2.50e-10    # s^n at 550 C
+
+# --- hardness mixing rule (smoothstep) ------------------------------------
+hardness:
+  Hcore: 210     # HV0.3, low-C martensite core (lower hardenability)
+  Hmax: 640      # HV0.3, high-C surface martensite
+  Cmin: 0.5
+  Cideal: 1.0
+
+# --- ECD (ISO 2639 practice @ 550 HV) [S6] ---------------------------------
+ecd_threshold_hv: 550.0
+
+# --- Andrews (1965) Ms(C) = A - b_C*C (K) [S5] -----------------------------
+ms:
+  A: 830.0
+  b_carbon: 245.0
+
+# --- thermal properties (950-1050 C austenite) -----------------------------
+thermal:
+  k: 40.0        # W/(m K)
+  rho: 7800.0    # kg/m^3
+  cp: 700.0      # J/(kg K)
+  T_init: 298.15

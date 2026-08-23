@@ -1,0 +1,50 @@
+# AISI 9310 — high-nickel carburizing gear/bearing steel.
+# Provenance per field (build plan N1: all constants traceable).
+alloy: aisi_9310
+name: "AISI 9310 (Ni-Cr-Mo carburizing steel)"
+
+composition_wt_pct:
+  C: 0.10       # 0.08-0.13
+  Mn: 0.55      # 0.45-0.70
+  Cr: 1.20      # 1.00-1.40
+  Mo: 0.09      # 0.08-0.15
+  Ni: 3.35      # 3.00-3.50
+
+# --- initial state ---------------------------------------------------------
+C0: 0.1         # core carbon content, mass-%
+
+# --- diffusion parameters --------------------------------------------------
+# Same Arrhenius family as 8620; Ni/Cr shift the prefactor slightly. Mid
+# literature activation energy used; calibration prior spans [100,200] kJ/mol.
+D0: 1.6e-5      # m^2/s
+Q: 140000.0     # J/mol (140 kJ/mol)
+
+# --- phase-transformation constants (hardening stage) ----------------------
+km_alpha: 0.011  # K^-1, Koistinen-Marburger constant [S5]
+jmak:
+  n: 2.0
+  k_pearlite: 6.00e-09   # s^n at 700 C (Ni retards pearlite -> smaller k)
+  k_bainite: 1.20e-10    # s^n at 550 C
+
+# --- hardness mixing rule (smoothstep) ------------------------------------
+hardness:
+  Hcore: 300     # HV0.3, high-Ni low-C martensite core (harder than 8620)
+  Hmax: 700      # HV0.3, high-C surface martensite
+  Cmin: 0.5
+  Cideal: 1.0
+
+# --- ECD (ISO 2639 practice @ 550 HV) [S6] ---------------------------------
+ecd_threshold_hv: 550.0
+
+# --- Andrews (1965) Ms(C) = A - b_C*C (K) [S5] -----------------------------
+# Ni raises Ms slightly relative to plain carbon at equal C.
+ms:
+  A: 845.0
+  b_carbon: 230.0
+
+# --- thermal properties (950-1050 C austenite) -----------------------------
+thermal:
+  k: 38.0        # W/(m K) (Ni lowers conductivity)
+  rho: 7850.0    # kg/m^3
+  cp: 690.0      # J/(kg K)
+  T_init: 298.15
