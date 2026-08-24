@@ -1,8 +1,8 @@
 """Bayesian calibration of carburizing parameters via NumPyro NUTS.
 
 Calibrates theta = {log D0, Q, C_pot, h_m, eps} against a measured hardness
-traverse. Gates (BUILD_PLAN §6): R-hat < 1.01 and bulk ESS > 400, otherwise
-results are blocked from release.
+traverse. Gates (see docs/adr/ADR-002 and docs/verification.md): R-hat < 1.01
+and bulk ESS > 400, otherwise results are blocked from release.
 
 The forward model uses the lumped-capacitance thermal surrogate (ADR-002) so
 each likelihood evaluation stays cheap enough for thousands of NUTS steps.

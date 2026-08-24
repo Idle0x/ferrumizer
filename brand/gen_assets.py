@@ -134,7 +134,7 @@ def lockup(ink: str, bg: str, gid: str) -> str:
 
 
 def main():
-    out = Path("/root/projects/ferrumizer/brand")
+    out = Path(__file__).resolve().parent
     (out / "mark.svg").write_text(mark_svg(INK_DARK, gid="field"))
     (out / "mark-mono-dark.svg").write_text(mark_svg(INK_LIGHT, mono=True))
     (out / "favicon.svg").write_text(favicon())

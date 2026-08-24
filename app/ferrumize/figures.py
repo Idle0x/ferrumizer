@@ -1,4 +1,4 @@
-"""Figure generation for F1-F10 (PRODUCT_SPEC §9).
+"""Figure generation for F1–F10 (see README "The figures" section).
 
 All figures are regenerated deterministically from raw physics via
 ``make figures`` / ``ferrumize figures``. A fixed seed and fixed matplotlib
@@ -26,7 +26,7 @@ from ferrumizer_physics.alloys import load_alloy
 # Deterministic PNG metadata (no timestamps -> byte-stable output).
 _PNG_META = {"Software": "ferrumizer", "Creation Time": "2026-08-22"}
 
-# Brand palette (brand/BUILD_SPEC.md §4)
+# Brand palette (mirrors the README figure styling)
 INK = "#ECE7DB"
 GRAPHITE = "#23262A"
 CHARCOAL = "#16181C"

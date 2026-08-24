@@ -6,8 +6,9 @@ diffusion + hardening), then recovers the parameters via gradient-based
 optimization (L-BFGS-B with exact JAX gradients).
 
 Two schedules (900 C and 1000 C soaks) are used jointly — this is the
-identifiability protocol from BUILD_PLAN §6: a single schedule leaves D0 and
-Q collinear (Arrhenius compensation), two temperatures break the degeneracy.
+identifiability protocol (see docs/adr/ADR-002 and figure F8): a single
+schedule leaves D0 and Q collinear (Arrhenius compensation), two temperatures
+break the degeneracy.
 
 Gate: max relative error across {log D0, Q, C_pot, eps} < 1e-4.
 """

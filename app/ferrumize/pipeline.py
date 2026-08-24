@@ -25,10 +25,12 @@ import jax.numpy as jnp
 from ferrumizer_physics.alloys import load_alloy
 from ferrumizer_physics.carbon import CarburizeConfig, run_carburize
 from ferrumizer_physics.hardening import (
+    QUENCH_MEDIA_H,
     ecd_from_hardness,
     hardness_profile,
     km_fraction,
     ms_andrews,
+    quench_fractions,
 )
 from ferrumizer_physics.thermal import ThermalConfig, grid, run_thermal, stability_dt
 
@@ -62,6 +64,13 @@ class Scenario:
     T_quench: float = 298.15
     h_conv: float = 20.0
     convective_model: str = "constant_h"
+    # quench model (None = instantaneous quench, legacy path; any medium =
+    # finite-rate Newton cooling + Scheil-JMAK diffusional phases)
+    quench_medium: str | None = None
+    quench_temp_K: float = 333.15  # ~60 C, typical quench oil
+    quench_agitation: float = 0.5
+    quench_time_s: float = 600.0
+    quench_n_samples: int = 120
     # discretization
     thermal_n: int = 161
     thermal_sample_every: int = 400
@@ -93,10 +102,15 @@ def thermal_dt(sc: Scenario, alpha: float) -> float:
 class FerrumizerPipeline:
     """Composes the three stages. Holds alloy preset and scenario."""
 
-    def __init__(self, scenario: Scenario | None = None, params: ProcessParams | None = None):
+    def __init__(
+        self,
+        scenario: Scenario | None = None,
+        params: ProcessParams | None = None,
+        preset: dict | None = None,
+    ):
         self.scenario = scenario or Scenario()
         self.params = params or ProcessParams()
-        self.preset = load_alloy(self.scenario.alloy)
+        self.preset = preset if preset is not None else load_alloy(self.scenario.alloy)
 
     # ------------------------------------------------------------------ #
     # pure-JAX forward (fast path)
@@ -146,11 +160,30 @@ class FerrumizerPipeline:
         n = cout["n"]
         x_mm = jnp.linspace(0.0, sc.x_half_mm, n)
         Ms = ms_andrews(cout["C_final"], preset["ms"]["A"], preset["ms"]["b_carbon"])
-        f_mart = km_fraction(Ms, sc.T_quench, preset["km_alpha"])
-        H = hardness_profile(cout["C_final"], preset, f_mart)
-        ecd = ecd_from_hardness(H, x_mm, preset["ecd_threshold_hv"])
+        th = preset["thermal"]
+        if sc.quench_medium is not None:
+            qf = quench_fractions(
+                cout["C_final"],
+                Ms,
+                preset,
+                T_quench=sc.quench_temp_K,
+                T_start=float(tout["Ts"][-1]),
+                h_quench=QUENCH_MEDIA_H[sc.quench_medium],
+                rho_cp=th["rho"] * th["cp"],
+                half_thickness_m=sc.size_mm / 2000.0,
+                agitation=sc.quench_agitation,
+                t_quench_total=sc.quench_time_s,
+                n_samples=sc.quench_n_samples,
+            )
+            f_mart = qf["f_martensite"]
+            H = qf["H"]
+            ecd = ecd_from_hardness(H, x_mm, preset["ecd_threshold_hv"])
+        else:
+            f_mart = km_fraction(Ms, sc.T_quench, preset["km_alpha"])
+            H = hardness_profile(cout["C_final"], preset, f_mart)
+            ecd = ecd_from_hardness(H, x_mm, preset["ecd_threshold_hv"])
 
-        return {
+        result = {
             "thermal": tout,
             "carbon": cout,
             "x_mm": x_mm,
@@ -159,6 +192,9 @@ class FerrumizerPipeline:
             "H": H,
             "ecd_mm": ecd,
         }
+        if sc.quench_medium is not None:
+            result["quench"] = qf
+        return result
 
     def ecd(self, params: ProcessParams | None = None):
         """Scalar effective case depth (mm) — the key differentiable objective."""

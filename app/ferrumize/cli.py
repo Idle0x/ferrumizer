@@ -1,12 +1,13 @@
 """Ferrumizer command-line interface.
 
-Implements the verbs described in PRODUCT_SPEC §4:
+Implements the verbs documented in README "What you can do with it":
 
     ferrumize validate CONFIG
     ferrumize simulate CONFIG
     ferrumize calibrate DATA.yaml --chains 4 --draws 1000
     ferrumize design TARGET_ECD_MM --alloy 8620 [--penalty gas|energy|none]
     ferrumize identifiability CONFIG
+    ferrumize ingest PLC_LOG
     ferrumize verify
     ferrumize figures
     ferrumize app
@@ -276,6 +277,54 @@ def design(
 
 
 @app.command()
+def ingest(
+    log: Path = typer.Argument(..., exists=True, help="PLC / datalogger export (CSV/TSV/TXT)."),
+    out: Path = typer.Option(Path("results/ingested"), "--out", help="Output directory."),
+):
+    """Ingest a messy furnace PLC log into normalized trajectory/traverse data.
+
+    Auto-detects delimiters, header rows, column roles (time/temperature/
+    depth/hardness), and units (deg C vs deg F). Writes a JSON report and,
+    when a time-temperature trajectory is present, a compressed
+    piecewise-constant schedule usable by `ferrumize simulate`.
+    """
+    import json
+
+    from ingest.plc_parser import parse_plc_log, schedule_from_trajectory
+
+    report = parse_plc_log(log)
+    typer.echo(f"Ingested {log.name}: {report.rows_used}/{report.rows_total} rows used "
+               f"(temp unit: {report.temperature_unit})")
+    for w in report.warnings:
+        typer.secho(f"  ! {w}", fg=typer.colors.YELLOW)
+
+    out.mkdir(parents=True, exist_ok=True)
+    payload = report.as_dict()
+
+    if report.has_trajectory:
+        traj = report.trajectory
+        assert traj is not None
+        sched = schedule_from_trajectory(traj["t_s"], traj["T_C"])
+        payload["schedule"] = sched
+        typer.secho(
+            f"  trajectory: {len(traj['t_s'])} points, "
+            f"{len(sched['schedule_times'])} soak segment(s)",
+            fg=typer.colors.GREEN,
+        )
+    if report.has_traverse:
+        trav = report.traverse
+        assert trav is not None
+        typer.secho(
+            f"  traverse: {len(trav['depth_mm'])} points (depth_mm vs hardness_HV)",
+            fg=typer.colors.GREEN,
+        )
+
+    with open(out / "ingested.json", "w") as f:
+        json.dump(payload, f, indent=2, default=float)
+    typer.secho(f"Wrote ingested data to {out}/ingested.json", fg=typer.colors.GREEN)
+
+
+@app.command()
 def identifiability(
     config: Path = typer.Argument(..., exists=True, help="Run config YAML."),
     out: Path = typer.Option(Path("results/identifiability"), "--out", help="Output directory."),
@@ -326,6 +375,7 @@ def verify():
     from verification.v6_recovery import run_v6
     from verification.v7_sbc_tarp import run_v7
     from verification.v8_literature import run_v8
+    from verification.q_quench import run_q1, run_q2, run_q3
 
     results = []
     runners = [
@@ -338,6 +388,9 @@ def verify():
         ("V6", run_v6),
         ("V7", run_v7),
         ("V8", run_v8),
+        ("Q1", run_q1),
+        ("Q2", run_q2),
+        ("Q3", run_q3),
     ]
     for vid, fn in runners:
         typer.echo(f"Running {vid} ...")

@@ -11,10 +11,12 @@ import jax.numpy as jnp
 
 from ferrumizer_physics.carbon import CarburizeConfig, run_carburize
 from ferrumizer_physics.hardening import (
+    QUENCH_MEDIA_H,
     ecd_from_hardness,
     hardness_profile,
     km_fraction,
     ms_andrews,
+    quench_fractions,
 )
 from ferrumizer_physics.thermal import lumped_surface_T
 
@@ -40,6 +42,12 @@ def fast_forward(
     carbon_mode: str,
     preset: dict,
     n_T_samples: int = 200,
+    # optional finite-rate quench (None = instantaneous, legacy path)
+    quench_medium: str | None = None,
+    quench_temp_K: float = 333.15,
+    quench_agitation: float = 0.5,
+    quench_time_s: float = 600.0,
+    quench_n_samples: int = 120,
 ) -> dict:
     """Run lumped-thermal -> carbon-diffusion -> hardening.
 
@@ -84,11 +92,28 @@ def fast_forward(
     # Hardening
     x_mm = jnp.linspace(0.0, x_half_mm, carbon_n)
     Ms = ms_andrews(cout["C_final"], preset["ms"]["A"], preset["ms"]["b_carbon"])
-    f_mart = km_fraction(Ms, T_quench, preset["km_alpha"])
-    H = hardness_profile(cout["C_final"], preset, f_mart)
+    if quench_medium is not None:
+        qf = quench_fractions(
+            cout["C_final"],
+            Ms,
+            preset,
+            T_quench=quench_temp_K,
+            T_start=float(T_surf[-1]),
+            h_quench=QUENCH_MEDIA_H[quench_medium],
+            rho_cp=rho_cp,
+            half_thickness_m=half_thickness_m,
+            agitation=quench_agitation,
+            t_quench_total=quench_time_s,
+            n_samples=quench_n_samples,
+        )
+        f_mart = qf["f_martensite"]
+        H = qf["H"]
+    else:
+        f_mart = km_fraction(Ms, T_quench, preset["km_alpha"])
+        H = hardness_profile(cout["C_final"], preset, f_mart)
     ecd = ecd_from_hardness(H, x_mm, preset["ecd_threshold_hv"])
 
-    return {
+    out = {
         "C_final": cout["C_final"],
         "x_mm": x_mm,
         "Ms": Ms,
@@ -96,3 +121,6 @@ def fast_forward(
         "H": H,
         "ecd_mm": ecd,
     }
+    if quench_medium is not None:
+        out["quench"] = qf
+    return out

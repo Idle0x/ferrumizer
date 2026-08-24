@@ -163,8 +163,8 @@ def design_schedule(
         "achieved_ecd_mm": final_ecd,
         "reachable_range_mm": [ecd_min, ecd_max],
         "feasible": feasible,
-        "loss_trace": np.array(loss_trace),
-        "ecd_trace": np.array(ecd_trace),
+        "loss_trace": [float(x) for x in loss_trace],
+        "ecd_trace": [float(x) for x in ecd_trace],
         "energy_proxy": float(energy_proxy(cur, times)),
         "penalty": penalty,
     }

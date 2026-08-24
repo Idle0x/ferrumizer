@@ -2,11 +2,12 @@
 
 Status: ACCEPTED
 Date: 2026-08-22
-Supersedes: literal reading of BUILD_PLAN Appendix A [S3] for the D0 prior
+Supersedes: the literal D0 prior range used in the original calibration plan
 
 ## Context
 
-BUILD_PLAN [S3] states the carbon-in-austenite diffusion prefactor prior as
+The original calibration plan specified the carbon-in-austenite diffusion
+prefactor prior as
 `D0 in [1e-12, 1e-9] m^2/s (lognormal)` alongside an activation energy
 `Q in [100, 200] kJ/mol`.
 
@@ -34,21 +35,21 @@ Use the physically consistent Arrhenius pair throughout:
 - Preset (point) values: D0 = 2.2e-5 m^2/s, Q = 137 kJ/mol (mid literature).
 - Calibration prior on D0: lognormal centered on 2.2e-5 m^2/s
   (sigma ~ 0.5 in log-space), truncated to a physically plausible band.
-- Calibration prior on Q: keep the [S3] range, Uniform(100, 200) kJ/mol.
+- Calibration prior on Q: keep the original range, Uniform(100, 200) kJ/mol.
 
-The Q prior from [S3] is retained unchanged; only the D0 prior is corrected.
+The Q prior is retained unchanged; only the D0 prior is corrected.
 
 ## Alternatives considered
 
 1. Keep D0 in [1e-12, 1e-9] as written. Rejected: produces near-zero
-   diffusion, breaks V2/V6/V8, and contradicts P1 (verified numerics) and N1
-   (no fabricated/unsupported numbers).
+   diffusion, breaks V2/V6/V8, and contradicts the verification-first
+   principles (no fabricated/unsupported numbers).
 2. Redefine Q in different units to make the small D0 work. Rejected: the
-   PRODUCT_SPEC fixes the schema unit as kJ/mol; changing units silently would
-   be a hidden tuning (N4).
+   schema fixes the unit as kJ/mol; changing units silently would be a hidden
+   tuning.
 
 ## Consequences
 
 - All preset YAMLs and the calibration prior use D0 ~ 2.2e-5 m^2/s.
-- The deviation is recorded here per BUILD_PLAN section 8 (decision records),
-  keeping the change explicit rather than silent drift.
+- The deviation is recorded here as a decision record, keeping the change
+  explicit rather than silent drift.

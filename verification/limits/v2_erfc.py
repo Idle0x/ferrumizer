@@ -9,7 +9,7 @@ where x is measured inward from the surface. The FD solver must reproduce it.
 The normalized L2 difference over the profile must be < 1e-3.
 
 Reference: Crank, "The Mathematics of Diffusion" (constant-surface-concentration
-semi-infinite solution); see BUILD_PLAN Appendix A [S8].
+semi-infinite solution).
 """
 
 from __future__ import annotations

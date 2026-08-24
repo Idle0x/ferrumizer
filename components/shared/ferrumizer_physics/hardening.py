@@ -82,6 +82,116 @@ def jmak_scheil_fraction(T_history, dt, n_exp, k_ref, T_nose, width):
     return 1.0 - jnp.exp(-(integral**n_exp))
 
 
+# --------------------------------------------------------------------------- #
+# Quench model: Newton cooling + Scheil-JMAK diffusional phases
+# --------------------------------------------------------------------------- #
+# Real quenches are NOT instantaneous: the cooling rate is set by the quench
+# medium (oil/water/polymer/air), its temperature, agitation, and part size.
+# Slow cooling lets diffusional phases (pearlite/bainite) form, consuming
+# austenite that can no longer become martensite — the direct cause of soft
+# spots and out-of-spec case depth in production. This model computes a
+# lumped Newton cooling curve and integrates Scheil-JMAK C-curves over it.
+QUENCH_MEDIA_H = {
+    "air": 50.0,        # W/m^2/K  — still air, slow
+    "oil": 900.0,       # W/m^2/K  — typical quench oil
+    "polymer": 1800.0,  # W/m^2/K  — polymer quenchant (PVP type)
+    "water": 3500.0,    # W/m^2/K  — agitated water
+}
+# Medium-specific C-curve noses (K) for the two diffusional phases
+# (pearlite ~600 C, bainite ~450 C for low-alloy carburizing steels).
+PEARLITE_NOSE_K = 873.15
+BAINITE_NOSE_K = 723.15
+PEARLITE_WIDTH_K = 90.0
+BAINITE_WIDTH_K = 70.0
+
+
+def newton_cooling_curve(
+    T_start,
+    T_quench,
+    h_quench,
+    rho_cp,
+    half_thickness_m,
+    t_samples,
+    agitation: float = 0.5,
+):
+    """Lumped-Newton cooling T(t) = Tq + (T0 - Tq) exp(-t / tau).
+
+    tau = rho*cp*L / (h*(1 + agitation))  with L the surface-to-center
+    distance (characteristic length). Agitation scales the effective film
+    coefficient. Fully differentiable in all inputs.
+    """
+    tau = (rho_cp * half_thickness_m) / (h_quench * (1.0 + agitation))
+    T = T_quench + (T_start - T_quench) * jnp.exp(-jnp.asarray(t_samples, jnp.float64) / tau)
+    return T
+
+
+def quench_fractions(
+    C_profile,
+    Ms_profile,
+    preset: dict,
+    T_quench,
+    T_start,
+    h_quench,
+    rho_cp,
+    half_thickness_m,
+    agitation: float = 0.5,
+    t_quench_total: float = 600.0,
+    n_samples: int = 120,
+):
+    """Martensite / diffusional fractions for a finite-rate quench.
+
+    Returns dict with f_martensite (per-depth), f_diffusional (per-depth,
+    pearlite + bainite via sequential Scheil-JMAK), the cooling curve, and
+    the resulting hardness profile.
+
+    Physics: austenite first transforms to pearlite/bainite while the part
+    cools through the C-curve noses; the austenite that survives to Ms
+    becomes martensite (Koistinen-Marburger). A slow quench (thick part,
+    mild oil, no agitation) consumes most austenite as diffusional phases,
+    so little martensite forms and the hardness/ECD collapses — exactly the
+    production failure mode this model exists to predict.
+    """
+    C = jnp.asarray(C_profile, jnp.float64)
+    Ms = jnp.asarray(Ms_profile, jnp.float64)
+    t = jnp.linspace(0.0, t_quench_total, n_samples)
+    cooling = newton_cooling_curve(
+        T_start, T_quench, h_quench, rho_cp, half_thickness_m, t, agitation
+    )
+    dt = t_quench_total / n_samples
+
+    jmak = preset.get("jmak", {})
+    n_exp = jmak.get("n", 2.0)
+    k_pearlite = jmak.get("k_pearlite", 8.5e-9)
+    k_bainite = jmak.get("k_bainite", 1.8e-10)
+
+    X_pearlite = jmak_scheil_fraction(
+        cooling, dt, n_exp, k_pearlite, PEARLITE_NOSE_K, PEARLITE_WIDTH_K
+    )
+    # bainite can only form from austenite not already consumed by pearlite
+    X_bainite = (1.0 - X_pearlite) * jmak_scheil_fraction(
+        cooling, dt, n_exp, k_bainite, BAINITE_NOSE_K, BAINITE_WIDTH_K
+    )
+    X_diff = X_pearlite + X_bainite
+
+    # surviving austenite -> martensite
+    f_mart = (1.0 - X_diff) * km_fraction(Ms, T_quench, preset["km_alpha"])
+
+    # hardness: martensite follows the carbon mixing rule; diffusional
+    # phases are substantially softer (pearlite/bainite ~ core level)
+    h = preset["hardness"]
+    H_mart = hardness_profile(C, preset, None)
+    H = f_mart * H_mart + (1.0 - f_mart) * h["Hcore"]
+
+    return {
+        "cooling_curve": cooling,
+        "X_pearlite": X_pearlite,
+        "X_bainite": X_bainite,
+        "X_diffusional": X_diff,
+        "f_martensite": f_mart,
+        "H": H,
+    }
+
+
 def run_hardening(
     C_profile, x_mm, T_quench: float, preset: dict, T_history=None, dt: float = 1.0
 ) -> dict:

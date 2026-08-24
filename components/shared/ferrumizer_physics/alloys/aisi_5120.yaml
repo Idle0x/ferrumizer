@@ -23,8 +23,8 @@ Q: 137000.0     # J/mol (137 kJ/mol, mid literature spread)
 km_alpha: 0.011  # K^-1, Koistinen-Marburger constant [S5]
 jmak:
   n: 2.0
-  k_pearlite: 1.20e-08   # s^n at 700 C (less alloying -> faster pearlite)
-  k_bainite: 2.50e-10    # s^n at 550 C
+  k_pearlite: 8.0e-02   # s^-n at ~600 C nose (less alloying -> faster pearlite)
+  k_bainite: 2.0e-03    # s^-n at ~450 C nose
 
 # --- hardness mixing rule (smoothstep) ------------------------------------
 hardness:

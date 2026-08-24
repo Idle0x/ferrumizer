@@ -2,7 +2,7 @@
 
 Demonstrates why a single-schedule calibration cannot uniquely identify
 D0 and Q (they are collinear), and how a two-schedule protocol resolves
-the ambiguity (BUILD_PLAN §6, figure F8).
+the ambiguity (see docs/adr/ADR-002 and figure F8).
 """
 
 from __future__ import annotations

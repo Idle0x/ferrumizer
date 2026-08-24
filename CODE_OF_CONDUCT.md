@@ -1,7 +1,27 @@
 # Code of Conduct
 
-Ferrumizer follows the Contributor Covenant Code of Conduct, version 2.1.
+Ferrumizer follows the [Contributor Covenant](https://www.contributor-covenant.org/),
+version 2.1.
 
-Participants are expected to be respectful, constructive, and precise. Harassment, discrimination, intimidation, and unwanted contact are not tolerated. Project maintainers may remove comments, reject contributions, or restrict participation when behavior violates this standard.
+## Our standard
 
-For private concerns, contact the repository maintainers through the project issue or security channel.
+- **Respectful and precise.** This is a numerics-heavy codebase: disagreement
+  should be about evidence, contracts, and error bars — not people.
+- **Constructive.** Point out the broken gate, not the person who wrote it.
+  A failing verification gate is a fact, not a fault.
+- **No harassment.** Discrimination, intimidation, and unwanted contact are
+  not tolerated in any form, on any channel.
+- **Assume good faith.** Every contributor here is volunteering effort; treat
+  review comments as about the code.
+
+## Enforcement
+
+Project maintainers may remove comments, reject contributions, or restrict
+participation when behavior violates this standard. Reports are handled
+confidentially. For private concerns, contact the maintainers through the
+repository's issue/security channel.
+
+## Scope
+
+This Code of Conduct applies to the repository, its issue tracker, pull
+requests, and any project-affiliated communication channels.

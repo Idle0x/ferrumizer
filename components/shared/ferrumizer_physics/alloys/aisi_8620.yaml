@@ -24,10 +24,16 @@ Q: 137000.0     # J/mol
 # --- phase-transformation constants (hardening stage) ----------------------
 km_alpha: 0.011  # K^-1, Koistinen-Marburger constant [S5]
 jmak:
-  # JMAK exponent and rate constants, representative of low-alloy CCT data.
+  # JMAK exponent and rate constants for the Scheil-additivity C-curves used
+  # by the finite-rate quench model (QuenchModel). k at the C-curve nose is
+  # ~1/tau_transformation^n: pearlite nose (~600 C) transforms on the order
+  # of tens of seconds, bainite (~450 C) on the order of minutes, for
+  # low-alloy carburizing steels. Values are order-of-magnitude CCT
+  # magnitudes (validated against the quench verification gate), NOT the
+  # placeholder magnitudes from the pre-quench dead code path.
   n: 2.0
-  k_pearlite: 8.50e-09   # s^n, at ~700 C
-  k_bainite: 1.80e-10    # s^n, at ~550 C
+  k_pearlite: 5.0e-02   # s^-n, at ~600 C nose
+  k_bainite: 1.0e-03    # s^-n, at ~450 C nose
 
 # --- hardness mixing rule (smoothstep — never clamp, stays C^1) -----------
 hardness:

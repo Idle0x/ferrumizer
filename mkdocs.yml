@@ -18,6 +18,7 @@ nav:
   - Verification: verification.md
   - Calibration guide: calibration.md
   - Design guide: design.md
+  - Ingestion guide: ingestion.md
   - CLI reference: cli.md
   - API reference: api.md
   - Gallery: gallery.md

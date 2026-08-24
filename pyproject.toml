@@ -1,6 +1,6 @@
 [project]
 name = "ferrumizer"
-version = "0.1.0"
+version = "0.1.1"
 description = "The differentiable heat-treatment engine: gas carburizing end-to-end as one differentiable pipeline."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -58,6 +58,7 @@ packages = [
   "app/calibration",
   "app/design",
   "app/identifiability",
+  "app/ingest",
   "verification",
 ]
 
