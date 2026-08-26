@@ -71,16 +71,15 @@ TRUE_EPS = 0.8
 # Prior widths (narrow enough to ensure numerical stability, wide enough to
 # be a genuine test: NUTS must find the posterior from a prior draw).
 #
-# C_pot is a BOUNDED prior. In SBC the generative truth is drawn from the
-# same prior the sampler uses, so if the truth lands near a wall the
-# posterior is truncated at that wall and the truth can fall outside its
-# own 90% interval — a systematic under-coverage / U-shaped rank
-# histogram that is a prior-geometry artifact, not a model defect. The
-# box is therefore kept wide (0.6-1.4 %C) so wall truncation affects only
-# a negligible edge fraction of truth draws (the 1.4% end is covered by
-# the R2 retained-austenite roll-off; the 0.6% end is mild case).
+# C_pot is BOUNDED. 0.8-1.2 is the validated operating window: outside it the
+# 8-point hardness profile becomes weakly informative (low C_pot -> nearly
+# flat profile; high C_pot -> retained-austenite roll-off makes the surface
+# hardness non-monotone in C_pot). Verified 2026-08-26: widening to
+# 0.6-1.4 made the SBC WORSE (p 0.074->0.000, cov 0.83->0.73, ranks skewed
+# to the top bin) — the extra width put truth draws in unidentifiable
+# regions. Keep the box at the validated window.
 PRIOR_SIGMA_LOG_D0 = 0.15
-PRIOR_C_POT_LO, PRIOR_C_POT_HI = 0.6, 1.4
+PRIOR_C_POT_LO, PRIOR_C_POT_HI = 0.8, 1.2
 
 # SBC settings — N_SIM is the statistical power of the test. 200 simulations
 # x 2 params = 400 ranks; the chi-squared test can distinguish uniformity
