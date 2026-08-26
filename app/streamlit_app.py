@@ -131,6 +131,7 @@ def run_emulation(
     quench_medium,
     quench_temp_c,
     quench_agitation,
+    h_m=1.0e-4,
 ):
     """Forward emulation with a two-stage boost/diffuse schedule + quench."""
     boost_s = boost_h * 3600.0
@@ -147,11 +148,16 @@ def run_emulation(
         carbon_dt=2.0,
         carbon_sample_every=300,
         size_mm=size_mm,
+        # mass_transfer (Robin) BC — SAME as the calibration path, so a
+        # calibrated h_m replays identically here instead of being silently
+        # dropped (the old dirichlet default made h_m a dead parameter on
+        # this tab). h_m is the surface mass-transfer coefficient (m/s).
+        carbon_mode="mass_transfer",
         quench_medium=quench_medium,
         quench_temp_K=quench_temp_c + 273.15,
         quench_agitation=quench_agitation,
     )
-    params = ProcessParams(C_pot=carbon_potential, eps=emissivity)
+    params = ProcessParams(C_pot=carbon_potential, eps=emissivity, h_m=h_m)
     return FerrumizerPipeline(scenario, params, preset=preset).forward()
 
 
@@ -223,8 +229,10 @@ with st.sidebar:
         ["oil", "water", "polymer", "air"],
         index=0,
         help="Real quenches are finite-rate. Oil ≈ 900 W/m²K film, water ≈ 3500, "
-        "polymer ≈ 1800, air ≈ 50. Slow media let bainite/pearlite form and "
-        "case hardness collapses — the model now predicts that.",
+        "polymer ≈ 1800, air ≈ 50. Slow media form bainite/pearlite where the "
+        "local cooling rate drops below the C-curve noses: the surface stays "
+        "martensitic, the CORE collapses — a depth-dependent profile, not a "
+        "uniform softening.",
     )
     quench_temp_c = st.slider(
         "Quench bath temperature (°C)", 20, 120, 60, 5,
@@ -236,13 +244,39 @@ with st.sidebar:
         "More agitation = faster quench = more martensite.",
     )
 
+    with st.expander("Advanced — surface mass-transfer coefficient (h_m)"):
+        h_m = st.number_input(
+            "h_m (m/s, log-scale)",
+            min_value=1e-6, max_value=1e-2, value=1.0e-4, step=1e-6,
+            format="%.2e",
+            help="Surface gas-to-part mass-transfer coefficient. The furnace "
+            "tab now uses the SAME mass_transfer (Robin) BC as the calibration "
+            "path, so a calibrated h_m replays identically here. At long soaks "
+            "the surface saturates near C_pot regardless, so h_m mostly "
+            "matters for short boost stages and the approach transient.",
+        )
+
     run = st.button("Run emulation", type="primary", help="Recompute the full forward pass.")
+
+    # Hardenability readout (Grossmann DI) — answers "will it through-harden?"
+    try:
+        from ferrumizer_physics.alloys import load_alloy, through_hardening_verdict
+
+        th_preset = preset if preset is not None else load_alloy(alloy_choice)
+        hv = through_hardening_verdict(th_preset, size_mm)
+        st.divider()
+        st.markdown("**Hardenability (Grossmann DI)**")
+        st.caption(f"DI ≈ {hv['di_mm']:.1f} mm vs section {hv['section_mm']:.0f} mm")
+        st.markdown(f"**{hv['verdict']}**")
+        st.caption(hv["caveat"])
+    except Exception:  # noqa: BLE001
+        pass  # hardenability is informational; never block the emulation
 
 # --------------------------------------------------------------------------- #
 # Tab 1 — Virtual Furnace (live schedule explorer)
 # --------------------------------------------------------------------------- #
-tab_furnace, tab_predict, tab_ingest = st.tabs(
-    ["Virtual Furnace", "Cycle Predictor", "Log Ingestion"]
+tab_furnace, tab_predict, tab_cct, tab_ingest = st.tabs(
+    ["Virtual Furnace", "Cycle Predictor", "CCT Diagram", "Log Ingestion"]
 )
 
 with tab_furnace:
@@ -267,6 +301,7 @@ with tab_furnace:
                 quench_medium,
                 quench_temp_c,
                 quench_agitation,
+                h_m=h_m,
             )
         st.session_state.result = result
 
@@ -320,6 +355,25 @@ with tab_furnace:
             "too deep = wasted cycle time and distortion."
         )
 
+        if "quench" in result:
+            st.subheader("Phase fractions across the section (CCT-style)")
+            fig, ax = plt.subplots(figsize=(7, 2.8), facecolor=CHARCOAL)
+            _style_ax(ax, "volume fraction", 1.0)
+            xq = np.asarray(result["x_mm"])
+            q = result["quench"]
+            ax.plot(xq, np.asarray(q["f_martensite"]), color=CREAM, lw=2, label="martensite")
+            ax.plot(xq, np.asarray(q["X_pearlite"]), color=EMBER, lw=2, label="pearlite")
+            ax.plot(xq, np.asarray(q["X_bainite"]), color=GOLD, lw=2, label="bainite")
+            ax.legend(facecolor=CHARCOAL, labelcolor=CREAM, fontsize=8)
+            st.pyplot(fig)
+            st.caption(
+                "Each depth has its own cooling curve, so each depth forms a "
+                "different phase mix. Fast-cooling surface keeps martensite; "
+                "slow-cooling core can form pearlite/bainite. This is the "
+                "'CCT-style' answer: the model now distinguishes local cooling "
+                "rates instead of one part-average curve."
+            )
+
     with right:
         st.subheader("Case-Depth Dial")
         st.pyplot(dial_gauge(float(result["ecd_mm"])))
@@ -328,11 +382,15 @@ with tab_furnace:
         if "quench" in result:
             q = result["quench"]
             st.metric("Surface martensite", f"{float(result['f_martensite'][0]) * 100:.0f} %")
-            st.metric("Diffusional phases", f"{float(q['X_diffusional']) * 100:.1f} %")
+            st.metric("Core martensite", f"{float(result['f_martensite'][-1]) * 100:.0f} %")
+            st.metric("Surface pearlite", f"{float(q['X_pearlite'][0]) * 100:.1f} %")
             st.caption(
-                "With the finite-rate quench model, a slow quench converts "
-                "austenite to bainite/pearlite and the dial drops — the real "
-                "production failure mode. Compare oil (slow) vs water (fast)."
+                "With the finite-rate, depth-resolved quench model, each depth "
+                "has its own cooling rate: the surface cools fast and keeps "
+                "martensite, the core cools slower and can form pearlite/"
+                "bainite. Compare oil (slow) vs water (fast) — and note how "
+                "the phase fractions vary across the section in the profile "
+                "plot below."
             )
         else:
             st.caption("Instant-quench path (legacy). Enable a quench medium to see bainite/pearlite effects.")
@@ -352,6 +410,19 @@ with tab_predict:
     uploaded = st.file_uploader(
         "Traverse CSV or PLC log", type=["csv", "txt", "log"], key="traverse"
     )
+    st.markdown("**Quench process** — tell the calibrator what the part actually saw.")
+    cal_quench = st.selectbox(
+        "Quench medium (calibration)",
+        ["none (instant quench)", "oil", "water", "polymer", "air"],
+        index=1,
+        help="The calibration forward model now uses the SAME spatial quench "
+        "physics as the Virtual Furnace. If your traverse came from an "
+        "oil-quenched part, select 'oil' — otherwise the posterior will be "
+        "biased to compensate for the missing quench physics and will NOT "
+        "reproduce your data when replayed in the furnace tab. 'none' is the "
+        "legacy instantaneous-quench assumption; use it only for "
+        "full-martensite traverses.",
+    )
     chains = st.number_input("Chains", 1, 4, 2, 1, help="MCMC chains (CPU cost ×chains).")
     draws = st.number_input("Draws per chain", 50, 500, 150, 10,
                             help="Posterior samples per chain.")
@@ -364,14 +435,14 @@ with tab_predict:
     if run_cal and uploaded is not None:
         depths = None
         H = None
+        report = None
         try:
             from ingest.plc_parser import parse_plc_log
 
             content = uploaded.read().decode("utf-8", errors="replace")
             report = parse_plc_log(uploaded.name, text=content)
-            if report.has_traverse:
+            if report.has_traverse and report.traverse is not None:
                 trav = report.traverse
-                assert trav is not None
                 depths = np.asarray(trav["depth_mm"], dtype=np.float64)
                 H = np.asarray(trav["hardness_HV"], dtype=np.float64)
                 for w in report.warnings:
@@ -383,7 +454,7 @@ with tab_predict:
                 H = np.asarray(data["hardness_HV"], dtype=np.float64)
         except Exception as exc:  # noqa: BLE001
             st.error(f"Could not parse input: {exc}")
-        if depths is not None and H is not None:
+        if depths is not None and H is not None and report is not None:
             st.info(
                 "Running NUTS on a light carbon grid — on CPU this typically "
                 "takes **5–20 min** for these settings. The app grid is "
@@ -393,15 +464,52 @@ with tab_predict:
             )
             from calibration.calibrate import run_calibration
 
-            scenario = Scenario(
-                alloy=alloy_label,
-                t_total=7200.0,
-                schedule_times=(0.0, 7200.0),
-                schedule_temps_C=(950.0, 950.0),
-                thermal_n=21,
-                carbon_n=41,      # light grid — see runtime warning above
-                carbon_dt=8.0,    # light grid
-            )
+            # ------------------------------------------------------------------ #
+            # Use the INGESTED trajectory when the log has one (review 3 P0 #3).
+            # Before this fix the calibrator hardcoded a 2 h / 950 C scenario
+            # and silently ignored what the furnace actually did — a 4 h / 925 C
+            # cycle was calibrated as 2 h / 950 C and the D0/Q posterior was
+            # biased to compensate for the wrong thermal history.
+            # ------------------------------------------------------------------ #
+            if report.has_trajectory and report.trajectory is not None:
+                from ingest.plc_parser import schedule_from_trajectory
+
+                sched = schedule_from_trajectory(
+                    report.trajectory["t_s"], report.trajectory["T_C"]
+                )
+                scenario = Scenario(
+                    alloy=alloy_label,
+                    t_total=float(sched["schedule_times"][-1]),
+                    schedule_times=tuple(sched["schedule_times"]),
+                    schedule_temps_C=tuple(sched["schedule_temps_C"]),
+                    thermal_n=21,
+                    carbon_n=41,      # light grid — see runtime warning above
+                    carbon_dt=8.0,    # light grid
+                    carbon_mode="mass_transfer",  # h_m must be exercised (see calibrate.py)
+                    quench_medium=None if cal_quench.startswith("none") else cal_quench,
+                    quench_temp_K=333.15,
+                    quench_agitation=0.5,
+                )
+                st.info(
+                    f"Using the ingested trajectory: {len(sched['schedule_times'])} "
+                    f"schedule knots, t_total = {scenario.t_total / 3600:.2f} h, "
+                    f"temps = {[round(x) for x in sched['schedule_temps_C']]} °C."
+                )
+            else:
+                scenario = Scenario(
+                    alloy=alloy_label,
+                    t_total=7200.0,
+                    schedule_times=(0.0, 7200.0),
+                    schedule_temps_C=(950.0, 950.0),
+                    thermal_n=21,
+                    carbon_n=41,      # light grid — see runtime warning above
+                    carbon_dt=8.0,    # light grid
+                    carbon_mode="mass_transfer",  # h_m must be exercised (see calibrate.py)
+                    quench_medium=None if cal_quench.startswith("none") else cal_quench,
+                    quench_temp_K=333.15,
+                    quench_agitation=0.5,
+                )
+                st.info("No trajectory in the log; using the default 2 h / 950 °C scenario.")
             with st.spinner("Running NUTS calibration (CPU)... do not close this tab."):
                 mcmc, summary = run_calibration(
                     depths,
@@ -447,11 +555,159 @@ with tab_predict:
                 "this data (see the identifiability analysis: one schedule "
                 "leaves D0 and Q tangled)."
             )
+
+            # Posterior predictive check: does the posterior actually
+            # reproduce the observed traverse? (review 2: the first thing a
+            # scientist checks — overlay predicted vs observed hardness.)
+            try:
+                from calibration.calibrate import posterior_predictive_hardness
+
+                ppc = posterior_predictive_hardness(mcmc, depths, scenario, n_draws=120)
+                fig, ax = plt.subplots(figsize=(7, 3.2), facecolor=CHARCOAL)
+                ax.set_facecolor(CHARCOAL)
+                ax.plot(ppc["obs_depths"], H, "o", color=GOLD, ms=5, label="observed")
+                ax.plot(ppc["obs_depths"], ppc["H_mean"], color=CREAM, lw=2, label="posterior mean")
+                ax.fill_between(
+                    ppc["obs_depths"], ppc["H_lo"], ppc["H_hi"],
+                    color=CREAM, alpha=0.25, label="5-95% credible band",
+                )
+                ax.set_xlabel("depth (mm)", color="white", fontsize=9)
+                ax.set_ylabel("hardness (HV)", color="white", fontsize=9)
+                ax.tick_params(colors="white", labelsize=8)
+                for spine in ax.spines.values():
+                    spine.set_color("#444444")
+                ax.legend(facecolor=CHARCOAL, labelcolor=CREAM, fontsize=8)
+                fig.tight_layout()
+                st.pyplot(fig)
+                resid = np.asarray(H) - ppc["H_mean"]
+                st.caption(
+                    f"Posterior predictive check — max |residual| = "
+                    f"{np.max(np.abs(resid)):.0f} HV. If the observed points "
+                    "fall outside the credible band, the model+prior cannot "
+                    "explain the traverse: check the quench medium selection, "
+                    "the schedule, or the alloy preset."
+                )
+
+                # residual structure check (review 2): are residuals random?
+                fig, ax = plt.subplots(figsize=(7, 2.4), facecolor=CHARCOAL)
+                ax.set_facecolor(CHARCOAL)
+                ax.axhline(0.0, color="#444444", lw=1)
+                ax.plot(depths, resid, "o-", color=EMBER, ms=4, lw=1)
+                ax.set_xlabel("depth (mm)", color="white", fontsize=9)
+                ax.set_ylabel("residual (HV)", color="white", fontsize=9)
+                ax.tick_params(colors="white", labelsize=8)
+                for spine in ax.spines.values():
+                    spine.set_color("#444444")
+                fig.tight_layout()
+                st.pyplot(fig)
+                slope = np.polyfit(depths, resid, 1)[0]
+                st.caption(
+                    f"Residuals vs depth — trend slope {slope:+.2f} HV/mm. "
+                    "A large nonzero slope means the model systematically "
+                    "over/under-predicts with depth (misspecified physics or "
+                    "wrong quench medium), not just measurement scatter. "
+                    "Random scatter about zero is what a good fit looks like."
+                )
+            except Exception as exc:  # noqa: BLE001
+                st.warning(f"Posterior predictive check unavailable: {exc}")
     elif run_cal:
         st.warning("Upload a traverse CSV first.")
 
 # --------------------------------------------------------------------------- #
-# Tab 3 — Log Ingestion (PLC/datalogger parser preview)
+# Tab 3 — CCT Diagram (the metallurgist's view: noses + cooling curves)
+# --------------------------------------------------------------------------- #
+with tab_cct:
+    st.subheader("CCT-style diagram: transformation noses + cooling curves")
+    st.markdown(
+        "The C-curves are the isothermal transformation start lines "
+        "(Scheil-JMAK, 1 % transformed) for pearlite and bainite — the same "
+        "kinetics the quench model integrates. The overlaid lines are the "
+        "actual computed cooling curves at **surface, mid-radius and core** "
+        "from the last Virtual Furnace run. Where a cooling curve crosses a "
+        "nose, that phase starts to form; martensite forms only where the "
+        "curve dives below Ms before crossing a nose."
+    )
+    if "result" in st.session_state and "quench" in st.session_state.result:
+        result = st.session_state.result
+        q = result["quench"]
+        from ferrumizer_physics.hardening import (
+            BAINITE_NOSE_K,
+            PEARLITE_NOSE_K,
+            ms_andrews,
+            ttt_start_times,
+        )
+
+        preset = result.get("_preset")
+        try:
+            th_preset = preset if preset is not None else load_alloy(alloy_choice)
+        except Exception:  # noqa: BLE001
+            th_preset = load_alloy("8620")
+        curve = ttt_start_times(th_preset, X=0.01)
+
+        fig, ax = plt.subplots(figsize=(8.5, 5), facecolor=CHARCOAL)
+        ax.set_facecolor(CHARCOAL)
+        ax.set_xscale("log")
+        ax.set_xlim(1e-1, 1e4)
+        ax.set_ylim(200, 1200)
+        ax.set_xlabel("time (s, log)", color="white", fontsize=10)
+        ax.set_ylabel("temperature (K)", color="white", fontsize=10)
+        ax.tick_params(colors="white", labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_color("#444444")
+
+        T = np.asarray(curve["T"])
+        ax.plot(np.asarray(curve["t_pearlite_s"]), T, color=EMBER, lw=2.2,
+                label=f"pearlite start (nose {PEARLITE_NOSE_K - 273.15:.0f} °C)")
+        ax.plot(np.asarray(curve["t_bainite_s"]), T, color=GOLD, lw=2.2,
+                label=f"bainite start (nose {BAINITE_NOSE_K - 273.15:.0f} °C)")
+
+        # Ms lines (surface/core carbon)
+        C_final = np.asarray(result["carbon"]["C_final"])
+        C_surf = float(C_final[0])
+        C_core = float(C_final[-1])
+        Ms_surf = float(ms_andrews(C_surf, th_preset["ms"]["A"], th_preset["ms"]["b_carbon"]))
+        Ms_core = float(ms_andrews(C_core, th_preset["ms"]["A"], th_preset["ms"]["b_carbon"]))
+        ax.axhline(Ms_surf, color="#8aa07f", ls=":", lw=1.4,
+                   label=f"Ms (surface C={C_surf:.2f})")
+        ax.axhline(Ms_core, color="#8aa07f", ls="--", lw=1.4,
+                   label=f"Ms (core C={C_core:.2f})")
+
+        # cooling curves at surface / mid / core from the spatial quench
+        Thist = np.asarray(q["cooling_history"])
+        ts = np.asarray(q["cooling_times_s"])
+        n_therm = Thist.shape[1]
+        mid = n_therm // 2
+        core = n_therm - 1
+        ax.plot(ts, Thist[:, 0], color=CREAM, lw=2.0, label="cooling: surface")
+        ax.plot(ts, Thist[:, mid], color="#b0b8c0", lw=2.0, ls="--", label="cooling: mid-radius")
+        ax.plot(ts, Thist[:, core], color="#6f7780", lw=2.0, ls="-.", label="cooling: core")
+
+        ax.legend(facecolor=CHARCOAL, labelcolor=CREAM, fontsize=8, loc="upper right")
+        fig.tight_layout()
+        st.pyplot(fig)
+        st.caption(
+            "Read it like a metallurgist: a cooling curve that stays right of a "
+            "nose for a long time accumulates diffusional fraction (soft); one "
+            "that plunges through before the nose has time to act lands in "
+            "martensite (hard). The surface curve usually dives steeply; the "
+            "core curve crosses the pearlite nose — exactly the depth-dependent "
+            "softening the profile plots show."
+        )
+        st.markdown(
+            "**Honest caveat:** the noses are Gaussian surrogates fitted to "
+            "order-of-magnitude CCT kinetics and validated against the 8620 "
+            "Jominy hardenability band (verification gate V8). They are "
+            "engineering approximations, not measured TTT diagrams — use them "
+            "for ranking quenches, not for certification."
+        )
+    else:
+        st.info(
+            "Run an emulation in the Virtual Furnace tab first — the cooling "
+            "curves are taken from the last computed quench."
+        )
+
+# --------------------------------------------------------------------------- #
+# Tab 4 — Log Ingestion (PLC/datalogger parser preview)
 # --------------------------------------------------------------------------- #
 with tab_ingest:
     st.subheader("Ingest a furnace PLC / datalogger export")
@@ -481,7 +737,7 @@ with tab_ingest:
                 }
             )
             sched = schedule_from_trajectory(traj["t_s"], traj["T_C"])
-            st.subheader("Compressed schedule (soak segments)")
+            st.subheader("Compressed schedule (RDP knots)")
             st.dataframe(
                 {
                     "time (s)": [round(x) for x in sched["schedule_times"]],
@@ -489,17 +745,21 @@ with tab_ingest:
                 }
             )
             st.caption(
-                "These segments feed directly into the Scenario schedule knots "
-                "— compare a planned cycle against what the furnace actually did."
+                "Ramer-Douglas-Peucker line simplification preserves heating "
+                "and cooling ramps as diagonal segments (linear interpolation "
+                "reproduces them exactly) instead of chopping them into a "
+                "staircase of flat soaks. These knots feed directly into the "
+                "Scenario — the Cycle Predictor tab now calibrates against "
+                "what the furnace actually did, not a hardcoded 2 h / 950 °C "
+                "default."
             )
-        if report.has_traverse:
-            trav = report.traverse
-            assert trav is not None
+        if report.has_traverse and report.traverse is not None:
+            trav_ingest = report.traverse
             st.subheader("Extracted traverse")
             st.dataframe(
                 {
-                    "depth (mm)": trav["depth_mm"],
-                    "hardness (HV)": trav["hardness_HV"],
+                    "depth (mm)": trav_ingest["depth_mm"],
+                    "hardness (HV)": trav_ingest["hardness_HV"],
                 }
             )
         if not report.has_trajectory and not report.has_traverse:

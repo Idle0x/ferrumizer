@@ -134,7 +134,7 @@ def test_hardening_functions_and_ecd_edges():
     p = load_alloy("8620")
     C = jnp.array([1.0, 0.8, 0.2])
     Ms = ms_andrews(C, p["ms"]["A"], p["ms"]["b_carbon"])
-    f = km_fraction(Ms, 298.15, p["km_alpha"])
+    f = km_fraction(Ms, 298.15, p["km_alpha"], p.get("mf_offset_K", 200.0))
     H = hardness_profile(C, p, f)
     x = jnp.array([0.0, 1.0, 2.0])
     assert float(smoothstep(0.5)) == pytest.approx(0.5)

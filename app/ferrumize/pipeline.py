@@ -17,9 +17,13 @@ to floating-point tolerance.
 from __future__ import annotations
 
 import os
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
+import jax
 import jax.numpy as jnp
 
 from ferrumizer_physics.alloys import load_alloy
@@ -31,13 +35,131 @@ from ferrumizer_physics.hardening import (
     km_fraction,
     ms_andrews,
     quench_fractions,
+    quench_fractions_depth,
 )
-from ferrumizer_physics.thermal import ThermalConfig, grid, run_thermal, stability_dt
+from ferrumizer_physics.thermal import (
+    ThermalConfig,
+    grid,
+    run_quench_thermal,
+    run_thermal,
+    stability_dt,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPONENTS = REPO_ROOT / "components"
+if str(COMPONENTS) not in sys.path:
+    sys.path.insert(0, str(COMPONENTS))
 
 
+# --------------------------------------------------------------------------- #
+# JIT memoization for the solver stages.
+#
+# The PDE stages (thermal, carbon, quench) are `jax.lax.scan`-based; calling
+# them without jit re-traces and re-dispatches on every call (~45 s each).
+# These wrappers close over the immutable config so JAX's trace cache is keyed
+# by (config, input shapes) and repeat calls reuse the compiled XLA program.
+# lru_cache on the *factory* means identical configs return the same compiled
+# function object — the actual cache hit.
+# --------------------------------------------------------------------------- #
+@lru_cache(maxsize=64)
+def _jit_run_thermal(geometry: str, size_mm: float, n: int, dt: float,
+                     t_total: float, alpha: float, h: float, eps: float,
+                     k: float, T_init_K: float, sample_every: int):
+    cfg = ThermalConfig(
+        geometry=geometry, size_mm=size_mm, n=n, dt=dt, t_total=t_total,
+        alpha=alpha, h=h, eps=eps, k=k, T_init_K=T_init_K,
+        sample_every=sample_every,
+    )
+    return jax.jit(lambda knots: run_thermal(knots, cfg))
+
+
+@lru_cache(maxsize=64)
+def _jit_quench_thermal(geometry: str, size_mm: float, n: int, dt: float,
+                        t_total: float, alpha: float, h: float, k: float,
+                        T_init_K: float, sample_every: int):
+    cfg = ThermalConfig(
+        geometry=geometry, size_mm=size_mm, n=n, dt=dt, t_total=t_total,
+        alpha=alpha, h=h, eps=0.0, k=k, T_init_K=T_init_K,
+        sample_every=sample_every,
+    )
+    return jax.jit(lambda T0_field, T_bath_K, h_quench: run_quench_thermal(
+        T0_field, cfg, T_bath_K, h_quench
+    ))
+
+
+# Cache of jitted quench-fractions programs, keyed by preset id + geometry.
+# A fresh (id, geometry, sizes, T_quench) tuple compiles one program; the
+# preset dict is captured in the closure (static Python data, never traced).
+_QUENCH_FRACTIONS_CACHE: dict[tuple, Callable] = {}
+
+
+def _jit_quench_fractions(preset: dict, geometry: str, n_thermal: int,
+                          n_carbon: int, size_mm: float, T_quench: float,
+                          dt: float):
+    """Jitted slice/interp/phase block for the spatial quench.
+
+    The quench thermal solve returns a (M, n_thermal) history; we flip the
+    geometry so column 0 = surface, interpolate onto the carbon depth nodes,
+    then run the per-depth Scheil-JMAK + KM + phase-specific hardness mixing
+    in one compiled unit. Compiling the slice/interp/phase chain together is
+    what keeps repeat calls fast (per-op dispatch on the 43 s quench solve
+    was the bottleneck). ``dt`` is the sampling interval of the quench
+    history (qcfg.dt * qcfg.sample_every) — it feeds the Scheil integral.
+    """
+    key = (id(preset), geometry, n_thermal, n_carbon, size_mm, T_quench, dt)
+    fn = _QUENCH_FRACTIONS_CACHE.get(key)
+    if fn is None:
+
+        def run(T_history, qx, C_final, Ms):
+            T = T_history  # (M, n_thermal)
+            depths_m = jnp.linspace(0.0, size_mm / 2000.0, n_carbon)  # 0=surface
+            if geometry == "slab":
+                # thermal slab grid runs -L/2..+L/2; the right half runs
+                # center->surface. FLIP so column 0 = surface.
+                thalf = T[:, qx.shape[0] // 2 :][:, ::-1]
+                half_depths = jnp.linspace(0.0, size_mm / 2000.0, thalf.shape[1])
+            elif geometry == "rod":
+                # Jominy axial grid runs 0 (quench end) -> L (far end);
+                # column 0 is already the quenched face (surface).
+                thalf = T
+                half_depths = jnp.linspace(0.0, size_mm / 2000.0, thalf.shape[1])
+            else:
+                # cylinder grid runs 0 (center) -> R (surface); flip so
+                # column 0 = surface, columns go surface -> center.
+                thalf = T[:, ::-1]
+                half_depths = jnp.linspace(0.0, size_mm / 2000.0, thalf.shape[1])
+            # interpolate the (M, n_thermal_half) history onto the carbon
+            # depth nodes (surface->core), vectorized across time rows
+            idx = jnp.clip(
+                jnp.searchsorted(half_depths, depths_m, side="right") - 1, 0,
+                half_depths.shape[0] - 2,
+            )
+            frac = (depths_m - half_depths[idx]) / jnp.maximum(
+                half_depths[idx + 1] - half_depths[idx], 1e-15
+            )
+            T_depths = thalf[:, idx] * (1.0 - frac) + thalf[:, idx + 1] * frac  # (M, n_carbon)
+            return quench_fractions_depth(C_final, Ms, preset, T_depths, dt=dt, T_quench=T_quench)
+
+        fn = jax.jit(run)
+        _QUENCH_FRACTIONS_CACHE[key] = fn
+    return fn
+
+
+@lru_cache(maxsize=64)
+def _jit_carburize(n: int, dt: float, t_total: float, mode: str,
+                   sample_every: int, x_half_mm: float):
+    ccfg = CarburizeConfig(
+        n=n, dt=dt, t_total=t_total, mode=mode, sample_every=sample_every,
+    )
+    # x_half_mm is consumed as a CONCRETE Python value inside run_carburize
+    # (dx = (x_half_mm/1000)/(n-1)), so it must be a static closure variable,
+    # not a jit argument.
+    return jax.jit(
+        lambda Ts, C0, D0, Q_J, C_pot, hm: run_carburize(
+            Ts, ccfg, C0=C0, D0=D0, Q_J=Q_J, C_pot=C_pot, hm=hm,
+            x_half_mm=x_half_mm,
+        )
+    )
 @dataclass
 class ProcessParams:
     """Free / calibrated process parameters (the gradient targets)."""
@@ -137,7 +259,11 @@ class FerrumizerPipeline:
             T_init_K=sc.T_init_K,
             sample_every=sc.thermal_sample_every,
         )
-        tout = run_thermal(sc.schedule_knots, tcfg)
+        tout = _jit_run_thermal(
+            tcfg.geometry, tcfg.size_mm, tcfg.n, tcfg.dt, tcfg.t_total,
+            tcfg.alpha, tcfg.h, tcfg.eps, tcfg.k, tcfg.T_init_K,
+            tcfg.sample_every,
+        )(sc.schedule_knots)
 
         ccfg = CarburizeConfig(
             n=sc.carbon_n,
@@ -146,40 +272,70 @@ class FerrumizerPipeline:
             mode=sc.carbon_mode,
             sample_every=sc.carbon_sample_every,
         )
-        cout = run_carburize(
+        cout = _jit_carburize(
+            ccfg.n, ccfg.dt, ccfg.t_total, ccfg.mode, ccfg.sample_every,
+            sc.x_half_mm,
+        )(
             tout["Ts"],
-            ccfg,
-            C0=jnp.asarray(preset["C0"], jnp.float64),
-            D0=jnp.asarray(p.D0, jnp.float64),
-            Q_J=jnp.asarray(p.Q_kJ * 1000.0, jnp.float64),
-            C_pot=jnp.asarray(p.C_pot, jnp.float64),
-            hm=jnp.asarray(p.h_m, jnp.float64),
-            x_half_mm=sc.x_half_mm,
+            jnp.asarray(preset["C0"], jnp.float64),
+            jnp.asarray(p.D0, jnp.float64),
+            jnp.asarray(p.Q_kJ * 1000.0, jnp.float64),
+            jnp.asarray(p.C_pot, jnp.float64),
+            jnp.asarray(p.h_m, jnp.float64),
         )
 
-        n = cout["n"]
+        # n is a Python int (the carbon grid node count), never a device
+        # value: passing a traced/device int to linspace forces a 20 s+ host
+        # sync per call. Use the scenario's own carbon_n.
+        n = sc.carbon_n
         x_mm = jnp.linspace(0.0, sc.x_half_mm, n)
         Ms = ms_andrews(cout["C_final"], preset["ms"]["A"], preset["ms"]["b_carbon"])
         th = preset["thermal"]
         if sc.quench_medium is not None:
-            qf = quench_fractions(
-                cout["C_final"],
-                Ms,
-                preset,
-                T_quench=sc.quench_temp_K,
-                T_start=float(tout["Ts"][-1]),
-                h_quench=QUENCH_MEDIA_H[sc.quench_medium],
-                rho_cp=th["rho"] * th["cp"],
-                half_thickness_m=sc.size_mm / 2000.0,
-                agitation=sc.quench_agitation,
-                t_quench_total=sc.quench_time_s,
-                n_samples=sc.quench_n_samples,
+            # SPATIAL quench: solve the 1-D conduction PDE with a quench BC
+            # starting from the end-of-soak temperature field. This gives
+            # depth-resolved cooling rates -> per-depth phase fractions
+            # (bainite/pearlite at slow-cooling depths, martensite at fast
+            # ones) instead of a single lumped part-average curve.
+            alpha = th["k"] / (th["rho"] * th["cp"])
+            qcfg = ThermalConfig(
+                geometry=sc.geometry,
+                size_mm=sc.size_mm,
+                n=sc.thermal_n,
+                dt=thermal_dt(sc, alpha),  # same stability-bound step
+                t_total=sc.quench_time_s,
+                alpha=alpha,
+                h=sc.h_conv,
+                eps=0.0,  # radiation negligible during quench
+                k=th["k"],
+                T_init_K=sc.quench_temp_K,
+                sample_every=max(1, sc.thermal_n // 8),
+            )
+            T0_field = tout["T_final"]
+            qt = _jit_quench_thermal(
+                qcfg.geometry, qcfg.size_mm, qcfg.n, qcfg.dt, qcfg.t_total,
+                qcfg.alpha, qcfg.h, qcfg.k, qcfg.T_init_K, qcfg.sample_every,
+            )(
+                T0_field,
+                jnp.asarray(sc.quench_temp_K, jnp.float64),
+                jnp.asarray(QUENCH_MEDIA_H[sc.quench_medium] * (1.0 + sc.quench_agitation), jnp.float64),
+            )
+            # Per-depth phase fractions from the spatial cooling history.
+            # The slicing/interp/phase block is jitted as one unit so the
+            # 43 s quench solve is not re-dispatched per indexing op.
+            dt_q = float(qcfg.dt * qcfg.sample_every)
+            qf = _jit_quench_fractions(
+                preset, sc.geometry, qcfg.n, n, sc.size_mm, sc.quench_temp_K,
+                dt_q,
+            )(
+                qt["T"], jnp.asarray(qt["x"], jnp.float64),
+                cout["C_final"], Ms,
             )
             f_mart = qf["f_martensite"]
             H = qf["H"]
             ecd = ecd_from_hardness(H, x_mm, preset["ecd_threshold_hv"])
         else:
-            f_mart = km_fraction(Ms, sc.T_quench, preset["km_alpha"])
+            f_mart = km_fraction(Ms, sc.T_quench, preset["km_alpha"], preset.get("mf_offset_K", 200.0))
             H = hardness_profile(cout["C_final"], preset, f_mart)
             ecd = ecd_from_hardness(H, x_mm, preset["ecd_threshold_hv"])
 
@@ -192,7 +348,11 @@ class FerrumizerPipeline:
             "H": H,
             "ecd_mm": ecd,
         }
-        if sc.quench_medium is not None:
+        if sc.quench_medium is not None and "qf" in locals():
+            # expose the spatial cooling history for the CCT tab
+            qf["cooling_history"] = qt["T"]
+            qf["cooling_x"] = jnp.asarray(qt["x"], jnp.float64)
+            qf["cooling_times_s"] = qt["times_s"]
             result["quench"] = qf
         return result
 

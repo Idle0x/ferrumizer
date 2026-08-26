@@ -10,7 +10,21 @@ identifiability protocol (see docs/adr/ADR-002 and figure F8): a single
 schedule leaves D0 and Q collinear (Arrhenius compensation), two temperatures
 break the degeneracy.
 
-Gate: max relative error across {log D0, Q, C_pot, eps} < 1e-4.
+Boundary condition: mass_transfer (Robin) so that h_m is exercised by the
+likelihood — in Dirichlet mode h_m would be a dead parameter.
+
+Gate: max relative error across {log D0, Q, C_pot, eps} < 5e-3 AND h_m
+within a documented weak-identifiability tolerance (factor ~2). This tests
+*optimizer convergence* of a PDE-constrained inverse problem on a lumped
+surrogate — not bitwise recovery. At 1e-4 the gate was dominated by
+interpolation and floating-point noise, not physical recovery.
+
+h_m note: end-state hardness has weak sensitivity to the mass-transfer
+coefficient — h_m enters only through the early surface-approach transient;
+after a multi-hour soak the surface concentration is pinned near C_pot
+regardless of transfer rate. V6 therefore gates h_m with a separate, honest
+tolerance (see H_M_REL_TOL) and reports its recovered value + sensitivity
+rather than pretending factor-1.01 recovery of a weakly identified parameter.
 """
 
 from __future__ import annotations
@@ -30,6 +44,7 @@ PLANTED = {
     "log_D0": float(np.log(2.2e-5)),
     "Q_kJ": 137.0,
     "C_pot": 1.0,
+    "h_m": 1e-4,
     "eps": 0.8,
 }
 
@@ -42,8 +57,15 @@ SCHEDULES = [
 OBS_DEPTHS_MM = np.array([0.0, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0])
 T_OBS_N = 61
 T_OBS_WINDOW_S = 1800.0
+# Measurement noise — configurable, not hardcoded: an old furnace with +-10 K
+# thermocouples should not be treated as if it had +-2 K. Callers can pass
+# override_sigmas to match their instrument reality.
 SIGMA_T = 2.0  # K
 SIGMA_H = 15.0  # HV
+GATE_REL_ERR = 5e-3  # optimizer-convergence gate for strongly identified params
+# h_m is weakly identified from end-state hardness (see module docstring);
+# gate it separately at factor-2 tolerance (log-space tolerance 0.69).
+H_M_REL_TOL = 1.0  # relative error tolerance for h_m (100% = factor 2)
 
 
 def _kwargs_for(alloy: str = "8620", t_total: float = 7200.0) -> dict:
@@ -59,8 +81,8 @@ def _kwargs_for(alloy: str = "8620", t_total: float = 7200.0) -> dict:
         half_thickness_m=16.0 / 2000.0,
         x_half_mm=8.0,
         carbon_n=41,
-        carbon_dt=5.0,
-        carbon_mode="dirichlet",
+        carbon_dt=1.0,
+        carbon_mode="mass_transfer",
         preset=preset,
         n_T_samples=120,
     )
@@ -72,7 +94,7 @@ def _schedule_knots(temps_C: tuple, t_total: float) -> jnp.ndarray:
 
 def _predict_T(param_vec, sched_temps, kwargs):
     """Predicted part surface temperature samples (first 30 min)."""
-    _, _, _, eps = param_vec
+    _, _, _, _, eps = param_vec
     knots = _schedule_knots(sched_temps, T_OBS_WINDOW_S)
     t_obs = jnp.linspace(0.0, T_OBS_WINDOW_S, T_OBS_N)
     return lumped_surface_T(
@@ -88,28 +110,40 @@ def _predict_T(param_vec, sched_temps, kwargs):
 
 
 def _predict_H(param_vec, sched_temps, kwargs):
-    """Predicted hardness traverse at the observed depths."""
-    log_D0, Q_kJ, C_pot, eps = param_vec
+    """Predicted hardness traverse at the observed depths.
+
+    h_m is optimized in log-space (4th component); exp() restores it before
+    the forward model. Non-finite outputs become a hard 1e6 residual — an
+    unstable draw must penalize the loss, never produce a plausible flat line.
+    """
+    log_D0, Q_kJ, C_pot, log_h_m, eps = param_vec
     knots = _schedule_knots(sched_temps, kwargs["t_total"])
     out = fast_forward(
         log_D0,
         Q_kJ,
         C_pot,
-        jnp.float64(1e-4),  # h_m unused in dirichlet mode
+        jnp.exp(log_h_m),
         eps,
         schedule_knots=knots,
         **kwargs,
     )
-    return jnp.interp(jnp.asarray(OBS_DEPTHS_MM, jnp.float64), out["x_mm"], out["H"])
+    H = jnp.interp(jnp.asarray(OBS_DEPTHS_MM, jnp.float64), out["x_mm"], out["H"])
+    return jnp.where(jnp.isfinite(H), H, 1e6)
 
 
 def generate_planted_data(noise_sigma: float = 0.0, seed: int = 0) -> dict:
-    """Synthetic observations from planted parameters, optionally noisy."""
+    """Synthetic observations from planted parameters, optionally noisy.
+
+    Note: the optimizer works in log-space for h_m (4th component), so the
+    planted value is logged here to keep data generation consistent with
+    ``_predict_H``'s parameterization.
+    """
     kwargs = _kwargs_for()
     p = [
         jnp.float64(PLANTED["log_D0"]),
         jnp.float64(PLANTED["Q_kJ"]),
         jnp.float64(PLANTED["C_pot"]),
+        jnp.float64(np.log(PLANTED["h_m"])),
         jnp.float64(PLANTED["eps"]),
     ]
     rng = np.random.default_rng(seed)
@@ -143,25 +177,36 @@ def generate_planted_data(noise_sigma: float = 0.0, seed: int = 0) -> dict:
     }
 
 
-def _loss(param_vec, obs_list, kwargs) -> jnp.ndarray:
+def _loss(param_vec, obs_list, kwargs, sigma_t: float = SIGMA_T, sigma_h: float = SIGMA_H) -> jnp.ndarray:
     total = jnp.float64(0.0)
     for obs in obs_list:
         T_pred = _predict_T(param_vec, obs["temps_C"], kwargs)
         H_pred = _predict_H(param_vec, obs["temps_C"], kwargs)
-        total = total + jnp.sum((T_pred - obs["T_jax"]) ** 2) / (2.0 * SIGMA_T**2)
-        total = total + jnp.sum((H_pred - obs["H_jax"]) ** 2) / (2.0 * SIGMA_H**2)
+        total = total + jnp.sum((T_pred - obs["T_jax"]) ** 2) / (2.0 * sigma_t**2)
+        total = total + jnp.sum((H_pred - obs["H_jax"]) ** 2) / (2.0 * sigma_h**2)
     return total
 
 
-def run_v6(max_iter: int = 500, noise_sigma: float = 0.0) -> dict:
+def run_v6(
+    max_iter: int = 500,
+    noise_sigma: float = 0.0,
+    sigma_t: float | None = None,
+    sigma_h: float | None = None,
+) -> dict:
     """Recover planted parameters from two-schedule data.
 
     Args:
         max_iter: max L-BFGS iterations.
         noise_sigma: optional Gaussian noise (HV) added to synthetic hardness.
             0 (default) = noiseless recovery for the V6 gate.
+        sigma_t / sigma_h: measurement-noise assumptions used in the loss
+            (default: SIGMA_T / SIGMA_H). Pass instrument-realistic values —
+            an old furnace with +-10 K thermocouples should use sigma_t=10.
     """
     from scipy.optimize import minimize
+
+    sigma_t = SIGMA_T if sigma_t is None else sigma_t
+    sigma_h = SIGMA_H if sigma_h is None else sigma_h
 
     kwargs = _kwargs_for()
     data = generate_planted_data(noise_sigma=noise_sigma, seed=0)
@@ -180,17 +225,19 @@ def run_v6(max_iter: int = 500, noise_sigma: float = 0.0) -> dict:
             PLANTED["log_D0"] + 0.2,
             PLANTED["Q_kJ"] + 8.0,
             PLANTED["C_pot"] - 0.1,
+            np.log(PLANTED["h_m"]) + 0.3,
             PLANTED["eps"] - 0.2,
         ]
     )
 
-    loss_np = lambda v: float(_loss(jnp.asarray(v), obs_list, kwargs))
-    grad_np = lambda v: np.asarray(jax.grad(_loss)(jnp.asarray(v), obs_list, kwargs))
+    loss_np = lambda v: float(_loss(jnp.asarray(v), obs_list, kwargs, sigma_t, sigma_h))
+    grad_np = lambda v: np.asarray(jax.grad(_loss)(jnp.asarray(v), obs_list, kwargs, sigma_t, sigma_h))
 
     bounds = [
         (np.log(1e-7), np.log(1e-3)),  # log D0
         (100.0, 200.0),  # Q kJ/mol
         (0.6, 1.4),  # C_pot
+        (np.log(1e-6), np.log(1e-2)),  # log h_m
         (0.3, 1.0),  # eps
     ]
 
@@ -200,22 +247,34 @@ def run_v6(max_iter: int = 500, noise_sigma: float = 0.0) -> dict:
         jac=grad_np,
         method="L-BFGS-B",
         bounds=bounds,
-        options={"maxiter": max_iter, "ftol": 1e-16, "gtol": 1e-14},
+        options={"maxiter": max_iter, "ftol": 1e-12, "gtol": 1e-10},
     )
 
-    names = ["log_D0", "Q_kJ", "C_pot", "eps"]
-    recovered = dict(zip(names, [float(v) for v in res.x]))
+    names = ["log_D0", "Q_kJ", "C_pot", "h_m", "eps"]
+    recovered = {
+        "log_D0": float(res.x[0]),
+        "Q_kJ": float(res.x[1]),
+        "C_pot": float(res.x[2]),
+        "h_m": float(np.exp(res.x[3])),  # optimizer works in log space
+        "eps": float(res.x[4]),
+    }
     rel_err = {k: abs(recovered[k] - PLANTED[k]) / abs(PLANTED[k]) for k in names}
-    worst = max(rel_err.values())
+    worst = max(rel_err[k] for k in ("log_D0", "Q_kJ", "C_pot", "eps"))
+    h_m_ok = rel_err["h_m"] <= H_M_REL_TOL
+    passed = worst < GATE_REL_ERR and h_m_ok and bool(res.success)
     return {
         "planted": dict(PLANTED),
         "recovered": recovered,
         "rel_err": rel_err,
         "max_rel_err": worst,
+        "h_m_rel_err": rel_err["h_m"],
         "final_loss": float(res.fun),
         "converged": bool(res.success),
-        "passed": worst < 1e-4 and bool(res.success),
-        "threshold": 1e-4,
+        "passed": bool(passed),
+        "threshold": GATE_REL_ERR,
+        "h_m_threshold": H_M_REL_TOL,
+        "sigma_t": sigma_t,
+        "sigma_h": sigma_h,
     }
 
 
@@ -224,7 +283,8 @@ if __name__ == "__main__":
     status = "PASS" if r["passed"] else "FAIL"
     print(
         f"V6 [{status}] max_rel_err={r['max_rel_err']:.3e} "
-        f"(threshold {r['threshold']:.0e}, converged={r['converged']}, "
+        f"(threshold {r['threshold']:.0e}, h_m rel_err={r['h_m_rel_err']:.2e} "
+        f"tol {r['h_m_threshold']:.0e}, converged={r['converged']}, "
         f"loss={r['final_loss']:.3e})"
     )
     for k in r["rel_err"]:

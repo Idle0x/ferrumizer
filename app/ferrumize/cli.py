@@ -33,6 +33,7 @@ for _p in (str(REPO_ROOT), str(REPO_ROOT / "app")):
 from ferrumize.config import (  # noqa: E402
     load_config,
     params_from_config,
+    scenario2_from_config,
     scenario_from_config,
     validate_config,
 )
@@ -168,16 +169,32 @@ def calibrate(
 
     cfg = load_config(data)
     scenario = scenario_from_config(cfg)
-    if carbon_n is not None or carbon_dt is not None:
-        import dataclasses
+    import dataclasses
 
+    if carbon_n is not None or carbon_dt is not None:
         scenario = dataclasses.replace(
             scenario,
             carbon_n=carbon_n if carbon_n is not None else scenario.carbon_n,
             carbon_dt=carbon_dt if carbon_dt is not None else scenario.carbon_dt,
         )
+    # Calibration always uses the mass-transfer (Robin) carbon boundary so
+    # that h_m is exercised by the likelihood (see calibrate.py docstring).
+    scenario = dataclasses.replace(scenario, carbon_mode="mass_transfer")
 
-    # Load observed traverse
+    # Two-schedule protocol (breaks D0-Q collinearity)
+    from ferrumize.config import scenario2_from_config
+
+    scenario2 = scenario2_from_config(cfg)
+    if scenario2 is not None:
+        scenario2 = dataclasses.replace(scenario2, carbon_mode="mass_transfer")
+        if carbon_n is not None or carbon_dt is not None:
+            scenario2 = dataclasses.replace(
+                scenario2,
+                carbon_n=scenario.carbon_n,
+                carbon_dt=scenario.carbon_dt,
+            )
+
+    # Load observed traverse(s)
     traverse = cfg.get("observations", {}).get("traverse_csv")
     if not traverse:
         _fail("Calibration data YAML must specify observations.traverse_csv")
@@ -186,7 +203,18 @@ def calibrate(
     obs_depths = np.asarray(obs["depth_mm"], dtype=np.float64)
     obs_H = np.asarray(obs["hardness_HV"], dtype=np.float64)
 
-    typer.echo(f"Running NUTS calibration: chains={chains} draws={draws} warmup={warmup}")
+    obs2_depths = obs2_H = None
+    traverse2 = (cfg.get("observations", {}) or {}).get("traverse_csv2")
+    if traverse2:
+        t2path = (data.parent / traverse2).resolve()
+        obs2 = np.genfromtxt(t2path, delimiter=",", names=True)
+        obs2_depths = np.asarray(obs2["depth_mm"], dtype=np.float64)
+        obs2_H = np.asarray(obs2["hardness_HV"], dtype=np.float64)
+
+    typer.echo(
+        f"Running NUTS calibration: chains={chains} draws={draws} warmup={warmup} "
+        f"{'+ second schedule' if scenario2 is not None else '(single schedule)'}"
+    )
     mcmc, summary = run_calibration(
         obs_depths,
         obs_H,
@@ -195,6 +223,9 @@ def calibrate(
         num_samples=draws,
         num_chains=chains,
         seed=_state["seed"],
+        obs2_depths=obs2_depths,
+        obs2_H=obs2_H,
+        scenario2=scenario2,
     )
 
     out.mkdir(parents=True, exist_ok=True)
@@ -220,6 +251,50 @@ def calibrate(
         )
     if not summary["gates_ok"]:
         _fail("Calibration BLOCKED from release: convergence gates not met.")
+
+    # Posterior predictive check: does the posterior reproduce the data?
+    from calibration.calibrate import posterior_predictive_hardness
+
+    try:
+        ppc = posterior_predictive_hardness(mcmc, obs_depths, scenario, n_draws=200)
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        ax.plot(obs_depths, obs_H, "o", color="#c1502e", label="observed", ms=5)
+        ax.plot(ppc["obs_depths"], ppc["H_mean"], color="#23262A", lw=2, label="posterior mean")
+        ax.fill_between(
+            ppc["obs_depths"], ppc["H_lo"], ppc["H_hi"],
+            color="#23262A", alpha=0.25, label="90% credible band",
+        )
+        if obs2_depths is not None and obs2_H is not None and scenario2 is not None:
+            ppc2 = posterior_predictive_hardness(mcmc, obs2_depths, scenario2, n_draws=200)
+            ax.plot(obs2_depths, obs2_H, "s", color="#8aa07f", label="observed (2nd sched)", ms=5)
+            ax.plot(ppc2["obs_depths"], ppc2["H_mean"], color="#8aa07f", lw=2, ls="--",
+                    label="posterior mean (2nd sched)")
+            ax.fill_between(
+                ppc2["obs_depths"], ppc2["H_lo"], ppc2["H_hi"],
+                color="#8aa07f", alpha=0.2,
+            )
+        ax.set_xlabel("depth (mm)")
+        ax.set_ylabel("hardness (HV)")
+        ax.set_title("Posterior predictive check — observed vs predicted")
+        ax.legend()
+        ax.grid(alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(out / "ppc_hardness.png", dpi=150)
+        plt.close(fig)
+        resid = np.asarray(obs_H) - ppc["H_mean"]
+        typer.secho(
+            f"PPC: max |residual| = {np.max(np.abs(resid)):.1f} HV, "
+            f"plot -> {out}/ppc_hardness.png",
+            fg=typer.colors.GREEN,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("Could not write posterior predictive plot: %s", exc)
+
     typer.secho(f"\nCalibration passed gates. Results in {out}/", fg=typer.colors.GREEN)
 
 
@@ -308,7 +383,7 @@ def ingest(
         payload["schedule"] = sched
         typer.secho(
             f"  trajectory: {len(traj['t_s'])} points, "
-            f"{len(sched['schedule_times'])} soak segment(s)",
+            f"{len(sched['schedule_times'])} schedule knot(s) (RDP)",
             fg=typer.colors.GREEN,
         )
     if report.has_traverse:
@@ -329,14 +404,27 @@ def identifiability(
     config: Path = typer.Argument(..., exists=True, help="Run config YAML."),
     out: Path = typer.Option(Path("results/identifiability"), "--out", help="Output directory."),
 ):
-    """Fisher/correlation analysis: single- vs two-schedule identifiability."""
+    """Fisher/correlation + profile-likelihood identifiability analysis.
+
+    Reports the Fisher information, correlation matrix, and condition number
+    for the single schedule in the config. When a ``schedule2`` block is
+    present, it also reports the combined (two-schedule) analysis and writes
+    2-D profile-likelihood contours over (log D0, Q) for both cases — the
+    global, non-Gaussian check that the two-schedule protocol actually breaks
+    the D0-Q degeneracy.
+    """
     import numpy as np
 
-    from identifiability.analyze import identifiability_report
+    from identifiability.analyze import (
+        identifiability_report,
+        profile_likelihood_grid,
+        two_schedule_comparison,
+    )
 
     cfg = load_config(config)
     scenario = scenario_from_config(cfg)
     params = params_from_config(cfg)
+    scenario2 = scenario2_from_config(cfg)
 
     # Build a synthetic observation set from the forward model for analysis.
     pipe = FerrumizerPipeline(scenario, params)
@@ -344,29 +432,131 @@ def identifiability(
     obs_depths = np.asarray(result["x_mm"])
     obs_H = np.asarray(result["H"])
 
-    import numpy as np
-
     param_vec = np.array([np.log(params.D0), params.Q_kJ, params.C_pot, params.h_m, params.eps])
-    report = identifiability_report(param_vec, obs_depths, obs_H, scenario)
-
     out.mkdir(parents=True, exist_ok=True)
-    np.save(out / "fisher.npy", report["fisher"])
-    np.save(out / "correlation.npy", report["correlation"])
-    typer.secho(f"Condition number: {report['condition_number']:.3e}", fg=typer.colors.CYAN)
-    typer.echo("Correlation matrix:")
-    names = report["param_names"]
-    corr = report["correlation"]
-    header = "        " + "  ".join(f"{n[:6]:>7s}" for n in names)
-    typer.echo(header)
-    for i, n in enumerate(names):
-        row = f"{n[:8]:>8s}" + "  ".join(f"{corr[i, j]:7.3f}" for j in range(len(names)))
-        typer.echo(row)
+
+    if scenario2 is not None:
+        # Two-schedule protocol: compare single vs combined identifiability.
+        pipe2 = FerrumizerPipeline(scenario2, params)
+        result2 = pipe2.forward()
+        obs_H2 = np.asarray(result2["H"])
+        report = two_schedule_comparison(
+            param_vec, scenario, scenario2, obs_depths, obs_H, obs_H2
+        )
+        single, combined = report["single_schedule"], report["combined"]
+        np.save(out / "fisher_single.npy", single["fisher"])
+        np.save(out / "correlation_single.npy", single["correlation"])
+        np.save(out / "fisher_combined.npy", combined["fisher"])
+        np.save(out / "correlation_combined.npy", combined["correlation"])
+        typer.secho(
+            f"Full-matrix condition numbers: single={single['condition_number']:.3e}  "
+            f"combined={combined['condition_number']:.3e}",
+            fg=typer.colors.CYAN,
+        )
+        typer.secho(
+            f"(D0, Q)-block condition numbers (nuisance profiled out, h_m's weak "
+            f"identifiability removed): single={single['d0q_condition_number']:.3e}  "
+            f"combined={combined['d0q_condition_number']:.3e}",
+            fg=typer.colors.CYAN,
+        )
+        typer.echo(
+            "The (D0, Q)-block is the honest two-schedule headline: its flat "
+            "eigenvalue grows from "
+            f"{single['d0q_min_eigenvalue']:.2e} to "
+            f"{combined['d0q_min_eigenvalue']:.2e}, i.e. two schedules add real "
+            "curvature along the ridge. The full-matrix number stays large "
+            "because h_m is weakly identified from end-state hardness (see V6) "
+            "— a separate, documented statement."
+        )
+        typer.echo("Correlation matrix (combined, two schedules):")
+        names = combined["param_names"]
+        corr = combined["correlation"]
+        header = "        " + "  ".join(f"{n[:6]:>7s}" for n in names)
+        typer.echo(header)
+        for i, n in enumerate(names):
+            row = f"{n[:8]:>8s}" + "  ".join(f"{corr[i, j]:7.3f}" for j in range(len(names)))
+            typer.echo(row)
+
+        # Profile likelihood contours: single vs combined (the global check).
+        # Uses a LIGHT carbon grid (dirichlet): the profile surface is a
+        # diagnostic of D0-Q degeneracy shape, not a production calculation —
+        # the full-grid, mass-transfer fidelity is what the Fisher matrix and
+        # the calibration likelihood provide. This keeps the 2-D grid
+        # tractable on CPU (seconds, not tens of minutes).
+        import dataclasses
+
+        light = dataclasses.replace(scenario, carbon_n=21, carbon_dt=8.0, carbon_mode="dirichlet")
+        light2 = dataclasses.replace(scenario2, carbon_n=21, carbon_dt=8.0, carbon_mode="dirichlet")
+        try:
+            import matplotlib
+
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+
+            single_pl = profile_likelihood_grid(
+                param_vec, obs_depths, obs_H, light,
+                log_D0_range=(-11.3, -10.2, 21), Q_range=(120, 155, 21), n_nuisance_iters=10,
+            )
+            # combined: sum the likelihood over both schedules at each grid
+            # point (the global two-schedule check)
+            combined_pl = profile_likelihood_grid(
+                param_vec,
+                obs_depths,
+                obs_H,
+                light,
+                log_D0_range=(-11.3, -10.2, 21), Q_range=(120, 155, 21), n_nuisance_iters=10,
+                obs2_depths=obs_depths,
+                obs2_H=obs_H2,
+                scenario2=light2,
+            )
+            fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+            for ax, pl, title in (
+                (axes[0], single_pl, "single schedule (900 C)"),
+                (axes[1], combined_pl, "two schedules (900 + 1000 C)"),
+            ):
+                cs = ax.contourf(
+                    pl["log_D0_grid"], pl["Q_grid"], pl["neg_log_lik"], levels=20, cmap="magma_r"
+                )
+                ax.set_xlabel("log D0")
+                ax.set_ylabel("Q (kJ/mol)")
+                ax.set_title(title)
+                ax.grid(alpha=0.2)
+            fig.colorbar(cs, ax=axes, label="negative log-likelihood")
+            fig.suptitle("Profile likelihood over (log D0, Q) — degeneracy breaks with two schedules")
+            fig.tight_layout()
+            fig.savefig(out / "profile_likelihood.png", dpi=150)
+            plt.close(fig)
+            np.save(out / "profile_likelihood_single.npy", single_pl["neg_log_lik"])
+            np.save(out / "profile_likelihood_combined.npy", combined_pl["neg_log_lik"])
+            typer.secho(
+                f"Profile likelihood contours -> {out}/profile_likelihood.png",
+                fg=typer.colors.GREEN,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("Could not write profile likelihood contours: %s", exc)
+    else:
+        report = identifiability_report(param_vec, obs_depths, obs_H, scenario)
+        np.save(out / "fisher.npy", report["fisher"])
+        np.save(out / "correlation.npy", report["correlation"])
+        typer.secho(f"Condition number: {report['condition_number']:.3e}", fg=typer.colors.CYAN)
+        typer.echo("Correlation matrix:")
+        names = report["param_names"]
+        corr = report["correlation"]
+        header = "        " + "  ".join(f"{n[:6]:>7s}" for n in names)
+        typer.echo(header)
+        for i, n in enumerate(names):
+            row = f"{n[:8]:>8s}" + "  ".join(f"{corr[i, j]:7.3f}" for j in range(len(names)))
+            typer.echo(row)
     typer.secho(f"Wrote matrices to {out}/", fg=typer.colors.GREEN)
 
 
 @app.command()
 def verify():
-    """Run the full V1-V8 verification suite; nonzero exit on any FAIL."""
+    """Run the full V1-V8 verification suite; nonzero exit on any FAIL.
+
+    V8b is the Jominy end-quench gate (published 8620H hardenability band),
+    added in the review-2 hardening pass.
+    """
     from verification.cross_ad.v4_cross_ad import run_v4, run_v4_containers
     from verification.limits.v1_lumped import run_v1
     from verification.limits.v2_erfc import run_v2
@@ -374,6 +564,7 @@ def verify():
     from verification.v5_check_gradients import run_v5
     from verification.v6_recovery import run_v6
     from verification.v7_sbc_tarp import run_v7
+    from verification.v8_jominy import run_jominy
     from verification.v8_literature import run_v8
     from verification.q_quench import run_q1, run_q2, run_q3
 
@@ -388,6 +579,7 @@ def verify():
         ("V6", run_v6),
         ("V7", run_v7),
         ("V8", run_v8),
+        ("V8b", run_jominy),
         ("Q1", run_q1),
         ("Q2", run_q2),
         ("Q3", run_q3),

@@ -23,6 +23,13 @@ Q: 137000.0     # J/mol
 
 # --- phase-transformation constants (hardening stage) ----------------------
 km_alpha: 0.011  # K^-1, Koistinen-Marburger constant [S5]
+# Mf floor (K below Ms). The 200 K heuristic caps f_M at 1-exp(-0.011*200)
+# = 0.89, but the measured 8620 Jominy quench-end (43.6 HRC) shows
+# essentially full martensite. With KM alpha = 0.011, 99 % completion needs
+# dT ~ 420 K — this value makes the floor consistent with the alpha and
+# with the published hardenability data. The floor still prevents
+# over-prediction at warm baths (bath at 120 C on a high-C case).
+mf_offset_K: 420.0
 jmak:
   # JMAK exponent and rate constants for the Scheil-additivity C-curves used
   # by the finite-rate quench model (QuenchModel). k at the C-curve nose is
@@ -35,10 +42,15 @@ jmak:
   k_pearlite: 5.0e-02   # s^-n, at ~600 C nose
   k_bainite: 1.0e-03    # s^-n, at ~450 C nose
 
-# --- hardness mixing rule (smoothstep — never clamp, stays C^1) -----------
+# --- hardness mixing rule (smoothstep + phase-specific rule of mixtures) --
+# H_martensite follows the carbon smoothstep; bainite/pearlite get their
+# own HV (lower bainite in a carburized case ~ 350-400 HV, pearlite
+# ~ 250-300 HV for 8620 — no longer collapsed into Hcore).
 hardness:
   Hcore: 230     # HV0.3, water-quenched low-C core martensite
   Hmax: 650      # HV0.3, ~1.0 mass-% C equivalent surface martensite
+  H_bainite: 380 # HV0.3, lower bainite in the carburized case
+  H_pearlite: 280 # HV0.3, pearlite in the case/core
   Cmin: 0.5      # mass-% C below which H ~ Hcore
   Cideal: 1.0    # mass-% C at which H reaches Hmax
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import jax.numpy as jnp
 import yaml
 
 _ALLOYS_DIR = Path(__file__).parent / "alloys"
@@ -64,6 +65,78 @@ def ms_temperature(preset: dict, carbon_wt_pct: float) -> float:
 # hardenability) and are documented as estimates, not certified constants.
 
 
+# --------------------------------------------------------------------------- #
+# Alloy-dependent carbon diffusion (Lee-Matlock-Van Tyne, ISIJ Int. 51
+# (2011) 1903-1911, Eq. 17 with Table 4 parameters)
+# --------------------------------------------------------------------------- #
+# Carbon diffusivity in austenite is NOT composition-independent: Cr and Mo
+# measurably retard it, Ni and Mn accelerate it. The classic single-pair
+# (D0, Q) used by the shipped presets is a plain-Fe/C approximation that is
+# wrong by 10-15 % for Ni/Cr/Mo alloyed carburizing steels. For CUSTOM
+# chemistries we therefore scale (D0, Q) with the Lee-Matlock-Van Tyne
+# empirical model, which was fitted to multicomponent diffusion data:
+#
+#   D(T, X_M) = [0.146 - 0.036*C] * exp[-(144.3 - 15.0*C + sum(k2_M*X_M))/(R*T)]
+#               * exp[sum(k1_M*X_M)]     (cm^2/s; energies in kJ/mol)
+#
+# Table 4 parameters (k1 on the prefactor, k2 on the activation energy):
+#   Mn: -0.0315 / -4.3663   Si: +0.0509 / +4.0507
+#   Ni: -0.0085 / -1.2407   Cr:  0.0*  / +7.7260
+#   Mo: +0.3031 / +12.1266  Al: -0.0520 / -6.7886
+# (*Cr's prefactor contribution is handled separately in the paper's
+# cross-correlation term; we keep k1_Cr = 0, documented.)
+#
+# Positive k2 (Cr, Mo, Si) raises the effective activation energy ->
+# slower carbon diffusion; negative k2 (Mn, Ni, Al) lowers it -> faster.
+# This is the published correction the review demanded for custom alloys.
+LEE2011_R = 8.314e-3  # kJ/(mol K)
+LEE2011_K1 = {"Mn": -0.0315, "Si": 0.0509, "Ni": -0.0085, "Cr": 0.0, "Mo": 0.3031, "Al": -0.0520}
+LEE2011_K2 = {"Mn": -4.3663, "Si": 4.0507, "Ni": -1.2407, "Cr": 7.7260, "Mo": 12.1266, "Al": -6.7886}
+
+
+def carbon_diffusivity_lee2011(T_K, C_wt_pct, comp: dict) -> float:
+    """Carbon diffusivity in alloyed austenite, cm^2/s (Lee 2011 Eq. 17).
+
+    ``comp`` maps element symbol -> mass-%. Used to derive composition-
+    dependent (D0, Q) pairs for custom alloys; the shipped YAML presets
+    keep their own literature values (provenance documented in-file).
+    """
+    C = float(C_wt_pct)
+    D0 = 0.146 - 0.036 * C
+    Q = 144.3 - 15.0 * C
+    k1_sum = 0.0
+    for el, k2 in LEE2011_K2.items():
+        X = float(comp.get(el, 0.0))
+        Q += k2 * X
+        k1_sum += LEE2011_K1.get(el, 0.0) * X
+    T = float(T_K)
+    return D0 * jnp.exp(-(Q) / (LEE2011_R * T)) * jnp.exp(k1_sum)  # cm^2/s
+
+
+def lee2011_d0_q(C_wt_pct: float, comp: dict) -> tuple[float, float]:
+    """Return (D0, Q) consistent with the Lee 2011 diffusivity at 950 C.
+
+    The shipped presets parametrize diffusion as an Arrhenius pair
+    D = D0*exp(-Q/(R T)). To keep that interface for custom alloys we fit
+    the Lee 2011 model at the carburizing reference temperature (950 C):
+    we take the model's activation energy directly (Q_eff) and back out
+    the prefactor D0_eff = D(950 C) / exp(-Q_eff/(R*1223.15)).
+    """
+    T_ref = 1223.15  # 950 C
+    C = float(C_wt_pct)
+    Q = 144.3 - 15.0 * C
+    k1_sum = 0.0
+    for el, k2 in LEE2011_K2.items():
+        X = float(comp.get(el, 0.0))
+        Q += k2 * X
+        k1_sum += LEE2011_K1.get(el, 0.0) * X
+    D0_pre = 0.146 - 0.036 * C
+    D_ref = D0_pre * jnp.exp(-(Q) / (LEE2011_R * T_ref)) * jnp.exp(k1_sum)  # cm^2/s
+    D0_eff = D_ref / jnp.exp(-(Q) / (LEE2011_R * T_ref))
+    # D0 in m^2/s (cm^2/s * 1e-4)
+    return float(D0_eff) * 1e-4, float(Q) * 1000.0
+
+
 def composition_to_preset(
     composition_wt_pct: dict[str, float],
     name: str = "custom",
@@ -82,10 +155,14 @@ def composition_to_preset(
         composition.
       * Hardness plateau Hmax scales with carbon (full-martensite
         hardness ~ 620 + 400*(C - 0.3) HV for C > 0.3, floor at core).
-      * Diffusion defaults to the 8620 gamma-iron pair (D0, Q) — carbon
-        diffusion in austenite is weakly alloy-dependent at carburizing
-        temperatures; ADR-001 documents the uncertainty.
+      * Diffusion D0/Q scaled with the Lee-Matlock-Van Tyne (2011)
+        composition-dependent carbon diffusivity model — no longer a blind
+        8620 clone. For a 4340 or a 17CrNiMo6 the diffusion pair now
+        reflects the actual Cr/Ni/Mo chemistry (10-15 % slower/faster than
+        plain carbon, matching the published multicomponent data).
       * Thermal properties default to generic low-alloy steel.
+      * Phase hardnesses (bainite/pearlite) estimated from base hardness
+        and hardenability (see ADR-001 for the estimation rules).
 
     All other preset fields (C0, JMAK, KM, ECD threshold, hardness mixing)
     take low-alloy defaults. The returned dict has exactly the schema
@@ -108,15 +185,29 @@ def composition_to_preset(
 
     # Full-martensite hardness plateau (HV) of the *carburized case*.
     # The atmosphere drives the surface toward ~0.9 mass-% C regardless of
-    # base carbon, so the plateau is anchored at the case composition, with a
-    # modest hardenability bump for alloying (Mn-equivalent).
+    # base carbon, so the plateau is anchored at the case composition.
+    # The alloying bump uses a monotonic saturation (Mn-equivalent) instead
+    # of the old hard 40 HV cap: high-alloy chemistries keep contributing
+    # but with diminishing returns, so a 4340 does not flatline at the same
+    # Hmax as an 8620.
     C_case = 0.9
-    alloy_bump = min(0.25 * (Mn + Cr + Ni + Mo), 40.0)  # HV, capped
-    Hmax = 620.0 + 40.0 * (C_case - 0.3) + alloy_bump
+    hard_equiv = 0.25 * (Mn + Cr + Ni + Mo)  # HV per wt-% (Mn-equivalent)
+    alloy_bump = 40.0 * (1.0 - jnp.exp(-hard_equiv / 40.0))  # smooth saturation, no hard clamp
+    Hmax = 620.0 + 40.0 * (C_case - 0.3) + float(alloy_bump)
 
-    # Defaults from the shipped 8620 preset (documented in that YAML).
-    D0 = comp.get("D0", 2.2e-5)
-    Q = comp.get("Q", 137000.0)
+    # Diffusion from the Lee-Matlock-Van Tyne (2011) composition model.
+    D0, Q = lee2011_d0_q(C, comp)
+    # Allow explicit overrides (composition may carry D0/Q keys in m^2/s, J/mol)
+    D0 = float(comp.get("D0", D0))
+    Q = float(comp.get("Q", Q))
+
+    # Phase-specific hardness estimates: bainite in a carburized case is
+    # substantially harder than the ferrite/pearlite core; pearlite sits
+    # between core and bainite. Anchored to the core hardness so low-alloy
+    # plain-carbon steels stay conservative.
+    Hcore = 230.0
+    H_bainite = min(Hcore + 150.0 + 0.15 * (Cr + Mo + Ni) * 100.0, 520.0)
+    H_pearlite = Hcore + 40.0
 
     preset = {
         "alloy": f"custom_{name}".lower().replace(" ", "_"),
@@ -128,8 +219,10 @@ def composition_to_preset(
         "km_alpha": 0.011,
         "jmak": {"n": 2.0, "k_pearlite": 5.0e-2, "k_bainite": 1.0e-3},
         "hardness": {
-            "Hcore": 230.0,
+            "Hcore": Hcore,
             "Hmax": float(Hmax),
+            "H_bainite": float(H_bainite),
+            "H_pearlite": H_pearlite,
             "Cmin": 0.5,
             "Cideal": 0.9,
         },
@@ -166,3 +259,88 @@ def validate_preset(preset: dict) -> list[str]:
     if "composition_wt_pct" in preset and "C" not in preset["composition_wt_pct"]:
         problems.append("composition_wt_pct.C is required")
     return problems
+
+
+# --------------------------------------------------------------------------- #
+# Hardenability: ideal critical diameter (DI) via Grossmann multipliers
+# --------------------------------------------------------------------------- #
+# Answers the metallurgist's question: "will this part through-harden, or
+# will I have a soft core?" DI (ASTM A255 practice, Grossmann 1942) is the
+# ideal critical diameter — the largest round bar that will just through-
+# harden to 50% martensite in an ideal (infinite-severity) quench. It is
+# computed from composition alone via multiplicative hardenability factors.
+# Compare DI to the part's section size: DI >> section -> through-hardening
+# likely; DI << section -> soft core expected.
+
+
+def _grossmann_factor(element: str, wt_pct: float) -> float:
+    """Empirical Grossmann hardenability multiplier for one element.
+
+    Factors are the classic ASTM A255 values for austenitized low-alloy
+    steels (carbon accounted separately in the base factor).
+    """
+    if element == "Mn":
+        return 1.0 + 3.33 * wt_pct
+    if element == "Si":
+        return 1.0 + 0.70 * wt_pct
+    if element == "Cr":
+        return 1.0 + 2.16 * wt_pct
+    if element == "Ni":
+        return 1.0 + 0.363 * wt_pct
+    if element == "Mo":
+        return 1.0 + 3.00 * wt_pct
+    if element == "Cu":
+        return 1.0 + 0.365 * wt_pct
+    if element == "V":
+        return 1.0 + 1.73 * wt_pct
+    return 1.0
+
+
+def ideal_critical_diameter_mm(preset: dict) -> float:
+    """Ideal critical diameter DI in mm (Grossmann / ASTM A255 practice).
+
+    DI = 25.4 * D_base * prod(factor(element))  with D_base a function of
+    carbon content:
+
+        D_base (in) = 0.15 + 0.85 * C   for C < 1.2 wt-%   (ASTM A255 curve)
+
+    A rough rule: DI (mm) ~ 25.4 * (0.15 + 0.85*C) * f_Mn * f_Cr * ... .
+    This is an estimate for austenitized plain and low-alloy steels, not a
+    substitute for a Jominy test. Used to answer the through-hardening
+    question with a documented approximation.
+    """
+    comp = preset.get("composition_wt_pct", {})
+    C = float(comp.get("C", preset.get("C0", 0.2)))
+    base_in = 0.15 + 0.85 * min(C, 1.2)
+    di_in = base_in
+    for el in ("Mn", "Si", "Cr", "Ni", "Mo", "Cu", "V"):
+        di_in *= _grossmann_factor(el, float(comp.get(el, 0.0)))
+    return 25.4 * di_in
+
+
+def through_hardening_verdict(preset: dict, section_mm: float) -> dict:
+    """'Will it through-harden?' — DI vs section-size comparison.
+
+    A part through-hardens (to 50% martensite at center) roughly when the
+    section size is below the ideal critical diameter adjusted for quench
+    severity. With an ideal quench (infinite H), DI is the limit; with real
+    quenches the effective section limit is smaller. We report the ratio and
+    a plain-language verdict, with the honest caveat that DI is a ranking
+    tool, not a certified Jominy curve.
+    """
+    di_mm = ideal_critical_diameter_mm(preset)
+    ratio = di_mm / max(section_mm, 1e-9)
+    if ratio >= 1.5:
+        verdict = "likely through-hardens (DI >> section)"
+    elif ratio >= 1.0:
+        verdict = "borderline — near through-hardening (DI ~ section)"
+    else:
+        verdict = "soft core expected (DI < section)"
+    return {
+        "di_mm": di_mm,
+        "section_mm": section_mm,
+        "di_to_section_ratio": ratio,
+        "verdict": verdict,
+        "caveat": "Grossmann DI is a ranking estimate (ASTM A255 practice); "
+        "validate with a Jominy end-quench test for certification.",
+    }

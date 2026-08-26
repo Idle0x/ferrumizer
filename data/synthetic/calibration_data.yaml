@@ -2,17 +2,24 @@ alloy: 8620
 geometry: slab
 size_mm: 16.0
 t_total: 7200.0
+# Two-schedule identifiability protocol (see ADR-002 / figure F8):
+# a single schedule leaves D0 and Q collinear; the second temperature
+# breaks the degeneracy. traverse_low.csv is the 900 C schedule,
+# traverse_high.csv the 1000 C schedule.
 schedule:
   times: [0.0, 7200.0]
-  temps_C: [950.0, 950.0]
+  temps_C: [900.0, 900.0]
+schedule2:
+  times: [0.0, 7200.0]
+  temps_C: [1000.0, 1000.0]
 thermal:
   n: 21
   sample_every: 20
 carbon:
-  n: 81
-  dt: 2.0
+  n: 41
+  dt: 1.0
   sample_every: 300
-  mode: dirichlet
+  mode: mass_transfer
 params:
   D0: 2.2e-5
   Q_kJ: 137.0
@@ -20,4 +27,5 @@ params:
   h_m: 1.0e-4
   eps: 0.8
 observations:
-  traverse_csv: ../literature/aisi_8620/traverse.csv
+  traverse_csv: traverse_low.csv
+  traverse_csv2: traverse_high.csv

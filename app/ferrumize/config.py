@@ -43,6 +43,37 @@ def scenario_from_config(cfg: dict) -> Scenario:
     )
 
 
+def scenario2_from_config(cfg: dict) -> Scenario | None:
+    """Second-schedule scenario for the two-schedule identifiability protocol.
+
+    Returns None when the config has no ``schedule2`` block. The second
+    schedule shares alloy/geometry/discretization but uses its own knots —
+    that is what breaks the D0-Q collinearity (see ADR-002 / figure F8).
+    """
+    sched2 = cfg.get("schedule2")
+    if not sched2:
+        return None
+    sc = scenario_from_config(cfg)
+    sc = Scenario(
+        alloy=sc.alloy,
+        geometry=sc.geometry,
+        size_mm=sc.size_mm,
+        schedule_times=tuple(sched2.get("times", sc.schedule_times)),
+        schedule_temps_C=tuple(sched2.get("temps_C", sc.schedule_temps_C)),
+        t_total=float(sched2.get("t_total", sc.t_total)),
+        T_init_K=sc.T_init_K,
+        T_quench=sc.T_quench,
+        h_conv=sc.h_conv,
+        thermal_n=sc.thermal_n,
+        thermal_sample_every=sc.thermal_sample_every,
+        carbon_n=sc.carbon_n,
+        carbon_dt=sc.carbon_dt,
+        carbon_sample_every=sc.carbon_sample_every,
+        carbon_mode=sc.carbon_mode,
+    )
+    return sc
+
+
 def params_from_config(cfg: dict) -> ProcessParams:
     p = cfg.get("params", {})
     return ProcessParams(

@@ -360,7 +360,7 @@ def fig_f1_hero(out: Path):
 
         C = jnp.asarray(C_hist[cidx])
         Ms = ms_andrews(C, preset["ms"]["A"], preset["ms"]["b_carbon"])
-        fM = km_fraction(Ms, scenario.T_quench, preset["km_alpha"])
+        fM = km_fraction(Ms, scenario.T_quench, preset["km_alpha"], preset.get("mf_offset_K", 200.0))
         H = hardness_profile(C, preset, fM)
         ecd = ecd_from_hardness(H, jnp.asarray(x_mm), preset["ecd_threshold_hv"])
 

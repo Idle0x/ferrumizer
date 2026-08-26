@@ -24,7 +24,7 @@ from ferrumizer_physics.hardening import newton_cooling_curve
 def _xdiff(medium: str, ag: float) -> float:
     sc = Scenario(quench_medium=medium, quench_temp_K=333.15, quench_agitation=ag, size_mm=16.0)
     res = FerrumizerPipeline(sc, ProcessParams()).forward()
-    return float(res["quench"]["X_diffusional"])
+    return float(res["quench"]["X_diffusional"][0])  # surface value
 
 
 def run_q1() -> dict:
@@ -41,13 +41,13 @@ def run_q2() -> dict:
     sc = Scenario(quench_medium="air", quench_temp_K=333.15, quench_agitation=0.2, size_mm=16.0)
     res = FerrumizerPipeline(sc, ProcessParams()).forward()
     passed = (
-        float(res["quench"]["X_diffusional"]) > 0.9
+        float(res["quench"]["X_diffusional"][0]) > 0.9
         and float(res["ecd_mm"]) < 0.01
         and float(res["H"][0]) < 300.0
     )
     return {
         "passed": passed,
-        "X_diff": float(res["quench"]["X_diffusional"]),
+        "X_diff": float(res["quench"]["X_diffusional"][0]),
         "ecd_mm": float(res["ecd_mm"]),
         "H_surface": float(res["H"][0]),
     }

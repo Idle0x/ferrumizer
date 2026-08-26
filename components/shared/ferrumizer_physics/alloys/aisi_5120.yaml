@@ -26,10 +26,13 @@ jmak:
   k_pearlite: 8.0e-02   # s^-n at ~600 C nose (less alloying -> faster pearlite)
   k_bainite: 2.0e-03    # s^-n at ~450 C nose
 
-# --- hardness mixing rule (smoothstep) ------------------------------------
+# --- hardness mixing rule (smoothstep + phase-specific rule of mixtures) --
+# 5120 bainite/pearlite slightly softer than 8620 (no Ni/Mo) — 350/260 HV.
 hardness:
   Hcore: 210     # HV0.3, low-C martensite core (lower hardenability)
   Hmax: 640      # HV0.3, high-C surface martensite
+  H_bainite: 350 # HV0.3, lower bainite in the carburized case
+  H_pearlite: 260 # HV0.3, pearlite in the case/core
   Cmin: 0.5
   Cideal: 1.0
 

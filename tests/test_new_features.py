@@ -29,7 +29,7 @@ class TestQuenchModel:
         """Slow quench converts austenite to pearlite -> no case depth."""
         sc = Scenario(quench_medium="air", quench_temp_K=333.15, quench_agitation=0.2, size_mm=16.0)
         res = FerrumizerPipeline(sc, ProcessParams()).forward()
-        assert float(res["quench"]["X_diffusional"]) > 0.9
+        assert float(res["quench"]["X_diffusional"][0]) > 0.9
         assert float(res["ecd_mm"]) < 0.01
         assert float(res["H"][0]) < 300.0
 
@@ -37,7 +37,7 @@ class TestQuenchModel:
         """Fast quench keeps most austenite as martensite -> full case."""
         sc = Scenario(quench_medium="water", quench_temp_K=298.15, quench_agitation=0.8, size_mm=16.0)
         res = FerrumizerPipeline(sc, ProcessParams()).forward()
-        assert float(res["quench"]["X_diffusional"]) < 0.05
+        assert float(res["quench"]["X_diffusional"][0]) < 0.05
         assert float(res["f_martensite"][0]) > 0.9
         assert float(res["ecd_mm"]) > 0.15
 
@@ -45,10 +45,21 @@ class TestQuenchModel:
         """Slower media must produce more diffusional phases (air > oil > water)."""
         def xdiff(medium, ag):
             sc = Scenario(quench_medium=medium, quench_temp_K=333.15, quench_agitation=ag, size_mm=16.0)
-            return float(FerrumizerPipeline(sc, ProcessParams()).forward()["quench"]["X_diffusional"])
+            return float(FerrumizerPipeline(sc, ProcessParams()).forward()["quench"]["X_diffusional"][0])
 
         assert xdiff("air", 0.2) > xdiff("oil", 0.3)
         assert xdiff("oil", 0.3) > xdiff("water", 0.8)
+
+    def test_depth_resolved_phases(self):
+        """Spatial quench: surface and core must see different cooling rates
+        (phase fractions differ across the section for a fast quench)."""
+        sc = Scenario(quench_medium="water", quench_temp_K=298.15, quench_agitation=0.8, size_mm=16.0)
+        res = FerrumizerPipeline(sc, ProcessParams()).forward()
+        q = res["quench"]
+        # per-depth arrays, not scalars
+        assert np.ndim(np.asarray(q["X_pearlite"])) == 1
+        # surface pearlite below core pearlite for water (surface cools faster)
+        assert float(q["X_pearlite"][0]) <= float(q["X_pearlite"][-1]) + 1e-9
 
     def test_cooling_curve_differentiable(self):
         """newton_cooling_curve must be JAX-differentiable."""

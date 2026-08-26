@@ -26,10 +26,13 @@ jmak:
   k_pearlite: 2.0e-02   # s^-n at ~600 C nose (Ni retards pearlite -> smaller k)
   k_bainite: 5.0e-04    # s^-n at ~450 C nose
 
-# --- hardness mixing rule (smoothstep) ------------------------------------
+# --- hardness mixing rule (smoothstep + phase-specific rule of mixtures) --
+# 9310 bainite is harder than 8620's (high Ni) — ~ 420 HV; pearlite ~ 290.
 hardness:
   Hcore: 300     # HV0.3, high-Ni low-C martensite core (harder than 8620)
   Hmax: 700      # HV0.3, high-C surface martensite
+  H_bainite: 420 # HV0.3, lower bainite (Ni-hardened)
+  H_pearlite: 290 # HV0.3, pearlite in the case/core
   Cmin: 0.5
   Cideal: 1.0
 

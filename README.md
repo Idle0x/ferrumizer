@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-23262A)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-D6B57C)](LICENSE)
-[![Verification](https://img.shields.io/badge/verification-V1--V8%2BQ-5D3320)](docs/verification.md)
+[![Verification](https://img.shields.io/badge/verification-V1--V9%2BQ-5D3320)](docs/verification.md)
 [![Repo](https://img.shields.io/badge/github-Idle0x%2Fferrumizer-23262A)](https://github.com/Idle0x/ferrumizer)
 
 > **Gradients through the furnace.**
@@ -200,7 +200,7 @@ git clone https://github.com/Idle0x/ferrumizer.git
 cd ferrumizer
 uv sync --extra app --extra dev --extra docs   # extras are exclusive — include them all
 make data
-ferrumize verify      # full verification suite (V1–V8 + Q1–Q3), ~25 min
+ferrumize verify      # full verification suite (V1–V9 + Q1–Q3), ~25 min
 ferrumize figures     # regenerate all 10 figures into figures/
 ferrumize app         # launch the Virtual Furnace app
 ```
@@ -272,7 +272,7 @@ gives the per-figure regeneration command.
 | `ferrumize design TARGET_ECD_MM --alloy 8620` | Inverse-design a schedule hitting a target ECD; add `--penalty energy` for the Pareto front. |
 | `ferrumize identifiability CONFIG` | Fisher/correlation analysis: why one schedule leaves D₀–Q tangled and two don't. |
 | `ferrumize ingest PLC_LOG` | Parse a messy furnace PLC/datalogger export into normalized trajectory + traverse. |
-| `ferrumize verify` | Run the V1–V8 + quench gate table. |
+| `ferrumize verify` | Run the V1–V9 + quench gate table. |
 | `ferrumize figures` | Regenerate all figures deterministically (seeded). |
 | `ferrumize app` | Launch the Streamlit Virtual Furnace. |
 
@@ -474,8 +474,8 @@ under `verification/`).
 | V4 | FD box vs JAX twin | relative infinity norm < 1e-3 |
 | V4c | Container composition gradient (through 2 boundaries) | finite, non-zero, within 20% of FD |
 | V5 | Runtime gradient checks | zero failures on AD boxes |
-| V6 | Two-schedule recovery | max relative error < 1e-4 |
-| V7 | SBC/TARP | SBC p > 0.05; coverage band |
+| V6 | Two-schedule recovery (mass-transfer BC) | strongly-identified params < 5e-3; h_m < factor 2 (documented weak identifiability) |
+| V7 | SBC/TARP | N_SIM ≥ 200, prior-based init; chi-squared p > 0.05; 90% coverage within binomial band |
 | V8 | Synthetic 8620 traverse reconstruction (literature-anchored params) | within stated reconstruction error bar |
 | Q1–Q3 | Quench model sanity | medium ranking (air > oil > water), collapse on slow quench, differentiability |
 
@@ -518,6 +518,13 @@ Beyond the shipped commands, the pieces are designed to be reused:
   low-alloy carburizing steels, not certified TTT data for a specific heat.
   The quench model is qualitative-to-semiquantitative: it predicts failure
   modes and rankings, not certified phase fractions.
+- **`h_m` (mass-transfer coefficient) is weakly identifiable from end-state
+  hardness.** Calibration uses the Robin (mass-transfer) boundary so `h_m` is
+  exercised, but after a multi-hour soak the surface concentration is pinned
+  near C_pot regardless of transfer rate; the posterior on `h_m` is broad
+  unless early-transient data is available (see V6 gate and calibration docs).
+- **Grossmann DI is a ranking estimate** (ASTM A255 practice), not a
+  certified Jominy curve; validate with an end-quench test for certification.
 - **The energy proxy is a relative penalty axis**, not an absolute energy
   figure.
 - **Hardness is a carbon-proxy mixing rule**, not a microstructure-resolved
@@ -556,7 +563,7 @@ Realistic, not hype:
 | [`app/identifiability/`](app/identifiability/) | Fisher/correlation identifiability analysis |
 | [`app/ingest/`](app/ingest/) | PLC/datalogger ingestion parser |
 | [`app/streamlit_app.py`](app/streamlit_app.py) | The Virtual Furnace app |
-| [`verification/`](verification/) | V1–V8 + quench gate scripts |
+| [`verification/`](verification/) | V1–V9 + quench gate scripts |
 | [`tests/`](tests/) | Unit + regression tests |
 | [`data/`](data/) | Synthetic traverse generators + literature reconstruction (provenance in `PROVENANCE.md`) |
 | [`docs/`](docs/) | MkDocs site: physics, architecture, calibration, verification, gallery, roadmap, ADRs |
