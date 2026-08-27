@@ -92,7 +92,8 @@ def _quench_fractions_spatial(
         thalf = qt["T"][:, ::-1]
         half_depths = jnp.linspace(0.0, x_half_mm / 1000.0, thalf.shape[1])
     idx = jnp.clip(
-        jnp.searchsorted(half_depths, depths_m, side="right") - 1, 0,
+        jnp.searchsorted(half_depths, depths_m, side="right") - 1,
+        0,
         half_depths.shape[0] - 2,
     )
     frac = (depths_m - half_depths[idx]) / jnp.maximum(
@@ -219,8 +220,7 @@ def fast_forward(
         f_mart = qf["f_martensite"]
         H = qf["H"]
     else:
-        f_mart = km_fraction(Ms, T_quench, preset["km_alpha"],
-                             preset.get("mf_offset_K", 200.0))
+        f_mart = km_fraction(Ms, T_quench, preset["km_alpha"], preset.get("mf_offset_K", 200.0))
         H = hardness_profile(cout["C_final"], preset, f_mart)
     ecd = ecd_from_hardness(H, x_mm, preset["ecd_threshold_hv"])
 

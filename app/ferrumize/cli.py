@@ -151,7 +151,9 @@ def calibrate(
         None, "--carbon-n", help="Override carbon grid nodes for the likelihood (smaller = faster)."
     ),
     carbon_dt: float | None = typer.Option(
-        None, "--carbon-dt", help="Override carbon time step (s) for the likelihood (larger = faster)."
+        None,
+        "--carbon-dt",
+        help="Override carbon time step (s) for the likelihood (larger = faster).",
     ),
 ):
     """Bayesian calibration (NumPyro NUTS) against a measured hardness traverse.
@@ -266,17 +268,30 @@ def calibrate(
         ax.plot(obs_depths, obs_H, "o", color="#c1502e", label="observed", ms=5)
         ax.plot(ppc["obs_depths"], ppc["H_mean"], color="#23262A", lw=2, label="posterior mean")
         ax.fill_between(
-            ppc["obs_depths"], ppc["H_lo"], ppc["H_hi"],
-            color="#23262A", alpha=0.25, label="90% credible band",
+            ppc["obs_depths"],
+            ppc["H_lo"],
+            ppc["H_hi"],
+            color="#23262A",
+            alpha=0.25,
+            label="90% credible band",
         )
         if obs2_depths is not None and obs2_H is not None and scenario2 is not None:
             ppc2 = posterior_predictive_hardness(mcmc, obs2_depths, scenario2, n_draws=200)
             ax.plot(obs2_depths, obs2_H, "s", color="#8aa07f", label="observed (2nd sched)", ms=5)
-            ax.plot(ppc2["obs_depths"], ppc2["H_mean"], color="#8aa07f", lw=2, ls="--",
-                    label="posterior mean (2nd sched)")
+            ax.plot(
+                ppc2["obs_depths"],
+                ppc2["H_mean"],
+                color="#8aa07f",
+                lw=2,
+                ls="--",
+                label="posterior mean (2nd sched)",
+            )
             ax.fill_between(
-                ppc2["obs_depths"], ppc2["H_lo"], ppc2["H_hi"],
-                color="#8aa07f", alpha=0.2,
+                ppc2["obs_depths"],
+                ppc2["H_lo"],
+                ppc2["H_hi"],
+                color="#8aa07f",
+                alpha=0.2,
             )
         ax.set_xlabel("depth (mm)")
         ax.set_ylabel("hardness (HV)")
@@ -288,8 +303,7 @@ def calibrate(
         plt.close(fig)
         resid = np.asarray(obs_H) - ppc["H_mean"]
         typer.secho(
-            f"PPC: max |residual| = {np.max(np.abs(resid)):.1f} HV, "
-            f"plot -> {out}/ppc_hardness.png",
+            f"PPC: max |residual| = {np.max(np.abs(resid)):.1f} HV, plot -> {out}/ppc_hardness.png",
             fg=typer.colors.GREEN,
         )
     except Exception as exc:  # noqa: BLE001
@@ -368,8 +382,10 @@ def ingest(
     from ingest.plc_parser import parse_plc_log, schedule_from_trajectory
 
     report = parse_plc_log(log)
-    typer.echo(f"Ingested {log.name}: {report.rows_used}/{report.rows_total} rows used "
-               f"(temp unit: {report.temperature_unit})")
+    typer.echo(
+        f"Ingested {log.name}: {report.rows_used}/{report.rows_total} rows used "
+        f"(temp unit: {report.temperature_unit})"
+    )
     for w in report.warnings:
         typer.secho(f"  ! {w}", fg=typer.colors.YELLOW)
 
@@ -440,9 +456,7 @@ def identifiability(
         pipe2 = FerrumizerPipeline(scenario2, params)
         result2 = pipe2.forward()
         obs_H2 = np.asarray(result2["H"])
-        report = two_schedule_comparison(
-            param_vec, scenario, scenario2, obs_depths, obs_H, obs_H2
-        )
+        report = two_schedule_comparison(param_vec, scenario, scenario2, obs_depths, obs_H, obs_H2)
         single, combined = report["single_schedule"], report["combined"]
         np.save(out / "fisher_single.npy", single["fisher"])
         np.save(out / "correlation_single.npy", single["correlation"])
@@ -494,8 +508,13 @@ def identifiability(
             import matplotlib.pyplot as plt
 
             single_pl = profile_likelihood_grid(
-                param_vec, obs_depths, obs_H, light,
-                log_D0_range=(-11.3, -10.2, 21), Q_range=(120, 155, 21), n_nuisance_iters=10,
+                param_vec,
+                obs_depths,
+                obs_H,
+                light,
+                log_D0_range=(-11.3, -10.2, 21),
+                Q_range=(120, 155, 21),
+                n_nuisance_iters=10,
             )
             # combined: sum the likelihood over both schedules at each grid
             # point (the global two-schedule check)
@@ -504,7 +523,9 @@ def identifiability(
                 obs_depths,
                 obs_H,
                 light,
-                log_D0_range=(-11.3, -10.2, 21), Q_range=(120, 155, 21), n_nuisance_iters=10,
+                log_D0_range=(-11.3, -10.2, 21),
+                Q_range=(120, 155, 21),
+                n_nuisance_iters=10,
                 obs2_depths=obs_depths,
                 obs2_H=obs_H2,
                 scenario2=light2,
@@ -522,7 +543,9 @@ def identifiability(
                 ax.set_title(title)
                 ax.grid(alpha=0.2)
             fig.colorbar(cs, ax=axes, label="negative log-likelihood")
-            fig.suptitle("Profile likelihood over (log D0, Q) — degeneracy breaks with two schedules")
+            fig.suptitle(
+                "Profile likelihood over (log D0, Q) — degeneracy breaks with two schedules"
+            )
             fig.tight_layout()
             fig.savefig(out / "profile_likelihood.png", dpi=150)
             plt.close(fig)
@@ -551,24 +574,32 @@ def identifiability(
 
 
 @app.command()
-def verify():
-    """Run the full V1-V8 verification suite; nonzero exit on any FAIL.
+def verify(
+    fast: bool = typer.Option(
+        False,
+        "--fast",
+        help="Skip the long gates (V6 recovery ~20 min, V7 200-sim SBC ~4 h). "
+        "CI uses this; the full suite remains the research-grade check.",
+    ),
+):
+    """Run the V1-V8 verification suite; nonzero exit on any FAIL.
 
     V8b is the Jominy end-quench gate (published 8620H hardenability band),
     added in the review-2 hardening pass.
+
+    With --fast, V6 (recovery, ~20 min) and V7 (200-sim SBC, ~4 h) are
+    skipped so the CI job completes in minutes on a small runner. The
+    skipped gates' latest full-suite results are documented in the README.
     """
     from verification.cross_ad.v4_cross_ad import run_v4, run_v4_containers
     from verification.limits.v1_lumped import run_v1
     from verification.limits.v2_erfc import run_v2
     from verification.mms.v3_mms import run_v3
     from verification.v5_check_gradients import run_v5
-    from verification.v6_recovery import run_v6
-    from verification.v7_sbc_tarp import run_v7
     from verification.v8_jominy import run_jominy
     from verification.v8_literature import run_v8
     from verification.q_quench import run_q1, run_q2, run_q3
 
-    results = []
     runners = [
         ("V1", run_v1),
         ("V2", run_v2),
@@ -576,14 +607,21 @@ def verify():
         ("V4", run_v4),
         ("V4c", run_v4_containers),
         ("V5", run_v5),
-        ("V6", run_v6),
-        ("V7", run_v7),
+    ]
+    if not fast:
+        from verification.v6_recovery import run_v6
+        from verification.v7_sbc_tarp import run_v7
+
+        runners += [("V6", run_v6), ("V7", run_v7)]
+    runners += [
         ("V8", run_v8),
         ("V8b", run_jominy),
         ("Q1", run_q1),
         ("Q2", run_q2),
         ("Q3", run_q3),
     ]
+
+    results = []
     for vid, fn in runners:
         typer.echo(f"Running {vid} ...")
         try:
@@ -594,6 +632,10 @@ def verify():
             results.append((vid, False, {"error": str(exc)}))
 
     typer.echo("\n=== Verification Suite ===")
+    if fast:
+        typer.echo(
+            "  mode: --fast (V6 recovery and V7 200-sim SBC skipped; see README for their results)"
+        )
     all_ok = True
     for vid, passed, r in results:
         all_ok = all_ok and passed

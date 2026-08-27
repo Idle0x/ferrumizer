@@ -13,6 +13,7 @@ jax.config.update("jax_enable_x64", True)
 
 ROOT = Path(__file__).resolve().parents[2]
 import sys
+
 sys.path.insert(0, str(ROOT / "components" / "shared"))
 sys.path.insert(0, str(ROOT / "app"))
 
@@ -33,11 +34,25 @@ def generate(seed: int = 20260822) -> None:
         total = 7200.0
         knots = jnp.array([[0.0, total], [temp, temp]], dtype=jnp.float64)
         result = fast_forward(
-            jnp.log(planted["D0"]), planted["Q_kJ"], planted["C_pot"], planted["h_m"], planted["eps"],
-            schedule_knots=knots, t_total=total, T_init_K=298.15, T_quench=298.15,
-            h_conv=20.0, k=th["k"], rho_cp=th["rho"] * th["cp"],
-            half_thickness_m=0.008, x_half_mm=8.0, carbon_n=81, carbon_dt=2.0,
-            carbon_mode="mass_transfer", preset=preset, n_T_samples=120,
+            jnp.log(planted["D0"]),
+            planted["Q_kJ"],
+            planted["C_pot"],
+            planted["h_m"],
+            planted["eps"],
+            schedule_knots=knots,
+            t_total=total,
+            T_init_K=298.15,
+            T_quench=298.15,
+            h_conv=20.0,
+            k=th["k"],
+            rho_cp=th["rho"] * th["cp"],
+            half_thickness_m=0.008,
+            x_half_mm=8.0,
+            carbon_n=81,
+            carbon_dt=2.0,
+            carbon_mode="mass_transfer",
+            preset=preset,
+            n_T_samples=120,
         )
         hardness = np.interp(depths, np.asarray(result["x_mm"]), np.asarray(result["H"]))
         hardness += rng.normal(0.0, 10.0, size=hardness.shape)

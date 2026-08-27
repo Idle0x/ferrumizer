@@ -177,7 +177,9 @@ def generate_planted_data(noise_sigma: float = 0.0, seed: int = 0) -> dict:
     }
 
 
-def _loss(param_vec, obs_list, kwargs, sigma_t: float = SIGMA_T, sigma_h: float = SIGMA_H) -> jnp.ndarray:
+def _loss(
+    param_vec, obs_list, kwargs, sigma_t: float = SIGMA_T, sigma_h: float = SIGMA_H
+) -> jnp.ndarray:
     total = jnp.float64(0.0)
     for obs in obs_list:
         T_pred = _predict_T(param_vec, obs["temps_C"], kwargs)
@@ -231,7 +233,9 @@ def run_v6(
     )
 
     loss_np = lambda v: float(_loss(jnp.asarray(v), obs_list, kwargs, sigma_t, sigma_h))
-    grad_np = lambda v: np.asarray(jax.grad(_loss)(jnp.asarray(v), obs_list, kwargs, sigma_t, sigma_h))
+    grad_np = lambda v: np.asarray(
+        jax.grad(_loss)(jnp.asarray(v), obs_list, kwargs, sigma_t, sigma_h)
+    )
 
     bounds = [
         (np.log(1e-7), np.log(1e-3)),  # log D0

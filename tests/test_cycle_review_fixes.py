@@ -175,14 +175,22 @@ class TestProfileLikelihood:
         # light grid (as the identifiability CLI uses): the profile surface
         # is a diagnostic of D0-Q degeneracy shape, not a production calc
         sc = dataclasses.replace(
-            Scenario(carbon_mode="mass_transfer"), carbon_n=21, carbon_dt=8.0, carbon_mode="dirichlet"
+            Scenario(carbon_mode="mass_transfer"),
+            carbon_n=21,
+            carbon_dt=8.0,
+            carbon_mode="dirichlet",
         )
         params = ProcessParams()
         pv = np.array([np.log(params.D0), params.Q_kJ, params.C_pot, params.h_m, params.eps])
         depths = np.linspace(0.0, 2.0, 9)
         H = 600.0 - 200.0 * depths
         pl = profile_likelihood_grid(
-            pv, depths, H, sc, log_D0_range=(-11.5, -10.0, 5), Q_range=(110.0, 165.0, 5),
+            pv,
+            depths,
+            H,
+            sc,
+            log_D0_range=(-11.5, -10.0, 5),
+            Q_range=(110.0, 165.0, 5),
             n_nuisance_iters=2,
         )
         assert pl["neg_log_lik"].shape == (5, 5)
@@ -205,7 +213,10 @@ class TestProfileLikelihood:
         from verification.v6_recovery import PLANTED, _kwargs_for, _predict_H
 
         sc = dataclasses.replace(
-            Scenario(carbon_mode="mass_transfer"), carbon_n=21, carbon_dt=8.0, carbon_mode="dirichlet"
+            Scenario(carbon_mode="mass_transfer"),
+            carbon_n=21,
+            carbon_dt=8.0,
+            carbon_mode="dirichlet",
         )
         kwargs = _kwargs_for()
         p = [
@@ -220,9 +231,14 @@ class TestProfileLikelihood:
         depths = OBS_DEPTHS_MM.copy()
         H = np.asarray(_predict_H(p, (1000.0, 1000.0), kwargs))
 
-        pv = np.array([PLANTED["log_D0"], PLANTED["Q_kJ"], PLANTED["C_pot"], PLANTED["h_m"], PLANTED["eps"]])
+        pv = np.array(
+            [PLANTED["log_D0"], PLANTED["Q_kJ"], PLANTED["C_pot"], PLANTED["h_m"], PLANTED["eps"]]
+        )
         pl = profile_likelihood_grid(
-            pv, depths, H, sc,
+            pv,
+            depths,
+            H,
+            sc,
             log_D0_range=(float(PLANTED["log_D0"]) - 1.0, float(PLANTED["log_D0"]) + 1.0, 7),
             Q_range=(float(PLANTED["Q_kJ"]) - 15.0, float(PLANTED["Q_kJ"]) + 15.0, 7),
             n_nuisance_iters=3,

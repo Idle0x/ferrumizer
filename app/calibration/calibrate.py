@@ -110,9 +110,7 @@ def model(obs_depths, obs_H, sigma, kwargs, infer_sigma: bool = True, obs2=None,
     if obs2 is not None and kwargs2 is not None:
         # two-schedule protocol: the same parameters must explain BOTH
         # traverses; this is what breaks the D0-Q collinearity.
-        H_pred2, _ = _predict_hardness(
-            log_D0, Q_kJ, C_pot, jnp.exp(log_hm), eps, obs2[0], kwargs2
-        )
+        H_pred2, _ = _predict_hardness(log_D0, Q_kJ, C_pot, jnp.exp(log_hm), eps, obs2[0], kwargs2)
         numpyro.sample("obs2", dist.Normal(H_pred2, sigma), obs=obs2[1])
 
 

@@ -62,8 +62,8 @@ def _light_scenario(temps_C: tuple[float, float]) -> Scenario:
         schedule_times=(0.0, 7200.0),
         schedule_temps_C=temps_C,
         thermal_n=21,
-        carbon_n=21,      # light grid — fast posterior shape, not research ESS
-        carbon_dt=8.0,    # light grid
+        carbon_n=21,  # light grid — fast posterior shape, not research ESS
+        carbon_dt=8.0,  # light grid
         carbon_mode="mass_transfer",
     )
 

@@ -37,10 +37,11 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+
+import plotly.graph_objects as go
 
 from ferrumize.pipeline import FerrumizerPipeline, ProcessParams, Scenario
-from ferrumizer_physics.alloys import composition_to_preset, list_alloys
+from ferrumizer_physics.alloys import composition_to_preset, list_alloys, load_alloy
 
 # Brand palette (mirrors app/ferrumize/figures.py)
 CHARCOAL = "#1c1b18"
@@ -48,6 +49,69 @@ INK = "#0d0c0b"
 CREAM = "#efe9dd"
 GOLD = "#d6b57c"
 EMBER = "#c1502e"
+
+PLOTLY_TEMPLATE = "plotly_dark"
+
+
+def _go_fig(height: int = 420) -> go.Figure:
+    """Interactive Plotly figure — mobile-friendly (pinch zoom, pan, tap for values).
+
+    No modebar (no icon row on top of the chart). Streamlit's own expand
+    button is enough to get a full-size interactive view; inside it,
+    pinch/scroll works.
+    """
+    fig = go.Figure()
+    fig.update_layout(
+        template=PLOTLY_TEMPLATE,
+        height=height,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor=CHARCOAL,
+        margin=dict(l=40, r=16, t=24, b=36),
+        font=dict(color=CREAM, size=11),
+        showlegend=False,
+        dragmode="pan",
+        xaxis=dict(gridcolor="#3a382f", zerolinecolor="#3a382f"),
+        yaxis=dict(gridcolor="#3a382f", zerolinecolor="#3a382f"),
+    )
+    return fig
+
+
+def _go_multi(
+    x,
+    series: dict[str, tuple],
+    height: int = 420,
+    xtitle: str = "time (s)",
+    ytitle: str = "",
+    yrange: tuple | None = None,
+    logx: bool = False,
+    legend: bool = False,
+):
+    """Multi-line Plotly chart with the legend at the BOTTOM (never on top)."""
+    fig = _go_fig(height=height)
+    for name, (y, color, dash) in series.items():
+        fig.add_trace(
+            go.Scatter(
+                x=np.asarray(x, dtype=float),
+                y=np.asarray(y, dtype=float),
+                mode="lines",
+                line=dict(color=color, width=2, dash=dash or "solid"),
+                name=name,
+                hovertemplate=f"{name}:<br>x=%{{x:.4g}}<br>y=%{{y:.4g}}<extra></extra>",
+            )
+        )
+    fig.update_xaxes(title_text=xtitle, **({"type": "log"} if logx else {}))
+    if ytitle:
+        fig.update_yaxes(title_text=ytitle)
+    if yrange is not None:
+        fig.update_yaxes(range=list(yrange))
+    if legend:
+        fig.update_layout(
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="top", y=-0.28, xanchor="center", x=0.5),
+        )
+    fig.update_layout(margin=dict(l=40, r=16, t=24, b=70 if legend else 36))
+    return fig
+
 
 st.set_page_config(page_title="Virtual Furnace — Ferrumizer", page_icon="◉", layout="wide")
 st.title("Virtual Furnace")
@@ -59,9 +123,9 @@ st.caption(
 # --------------------------------------------------------------------------- #
 # Shared plot styling (fixed axes so physics is visible, not auto-scaled away)
 # --------------------------------------------------------------------------- #
-TEMP_YMAX = 1400.0   # K
-CARBON_YMAX = 1.4    # mass-%
-HARD_YMAX = 700.0    # HV
+TEMP_YMAX = 1400.0  # K
+CARBON_YMAX = 1.4  # mass-%
+HARD_YMAX = 700.0  # HV
 
 
 def _style_ax(ax, ylabel, ymax, ymin=0.0):
@@ -104,12 +168,23 @@ def dial_gauge(ecd_mm: float, max_mm: float = 2.0, threshold: float = 550.0):
     ax.plot(0, 0, "o", color="white", ms=8, zorder=5)
 
     ax.text(
-        0, -0.28, f"{ecd_mm:.3f} mm", ha="center", va="top",
-        color="white", fontsize=18, fontweight="bold",
+        0,
+        -0.28,
+        f"{ecd_mm:.3f} mm",
+        ha="center",
+        va="top",
+        color="white",
+        fontsize=18,
+        fontweight="bold",
     )
     ax.text(
-        0, -0.52, f"ECD @ {threshold:.0f} HV", ha="center", va="top",
-        color=GOLD, fontsize=10,
+        0,
+        -0.52,
+        f"ECD @ {threshold:.0f} HV",
+        ha="center",
+        va="top",
+        color=GOLD,
+        fontsize=10,
     )
     ax.set_xlim(-1.25, 1.25)
     ax.set_ylim(-0.7, 1.15)
@@ -161,6 +236,123 @@ def run_emulation(
     return FerrumizerPipeline(scenario, params, preset=preset).forward()
 
 
+def run_emulation_with_schedule(
+    preset,
+    alloy_label,
+    schedule_times,
+    schedule_temps_C,
+    size_mm,
+    quench_medium,
+    quench_temp_c,
+    quench_agitation,
+    carbon_potential,
+    emissivity,
+    h_m=1.0e-4,
+):
+    """Forward emulation for an arbitrary (possibly ingested) schedule.
+
+    Same pipeline, same mass-transfer BC as the sidebar-run path, so results
+    from an ingested PLC trajectory are directly comparable to manual runs.
+    """
+    t_total = float(schedule_times[-1])
+    scenario = Scenario(
+        alloy=alloy_label,
+        t_total=t_total,
+        schedule_times=tuple(float(t) for t in schedule_times),
+        schedule_temps_C=tuple(float(t) for t in schedule_temps_C),
+        thermal_n=41,
+        thermal_sample_every=100,
+        carbon_n=81,
+        carbon_dt=2.0,
+        carbon_sample_every=300,
+        size_mm=size_mm,
+        carbon_mode="mass_transfer",
+        quench_medium=quench_medium,
+        quench_temp_K=quench_temp_c + 273.15,
+        quench_agitation=quench_agitation,
+    )
+    params = ProcessParams(C_pot=carbon_potential, eps=emissivity, h_m=h_m)
+    return FerrumizerPipeline(scenario, params, preset=preset).forward()
+
+
+def render_profile_plots(result, carbon_potential):
+    """Carbon / hardness / phase-fraction profiles for an emulation result.
+
+    Shared by the Virtual Furnace tab and the Log Ingestion tab's
+    ingested-schedule run so both render identically.
+    """
+    x_mm = np.asarray(result["x_mm"])
+
+    st.subheader("Carbon profile (end of cycle)")
+    fig = _go_multi(
+        x_mm,
+        {"C": (result["carbon"]["C_final"], GOLD, None)},
+        xtitle="depth (mm)",
+        ytitle="C (mass-%)",
+        yrange=(0, CARBON_YMAX),
+    )
+    fig.add_hline(
+        y=carbon_potential,
+        line=dict(color=CREAM, dash="dash", width=1),
+        opacity=0.5,
+        annotation_text=f"C_pot = {carbon_potential:.2f}",
+        annotation_font_size=10,
+    )
+    st.plotly_chart(fig, width="stretch")
+    st.caption(
+        "Carbon concentration vs depth at cycle end. The dashed line is the "
+        "atmosphere carbon potential. A steeper near-surface gradient is what "
+        "short soak times produce; diffuse stages flatten it."
+    )
+
+    st.subheader("Hardness profile")
+    fig = _go_multi(
+        x_mm,
+        {"H": (result["H"], CREAM, None)},
+        xtitle="depth (mm)",
+        ytitle="H (HV)",
+        yrange=(0, HARD_YMAX),
+    )
+    fig.add_hline(
+        y=550.0,
+        line=dict(color=EMBER, dash="dash", width=1.2),
+        annotation_text="550 HV (ISO 2639 ECD threshold)",
+        annotation_font_size=10,
+        annotation_font_color=EMBER,
+    )
+    st.plotly_chart(fig, width="stretch")
+    st.caption(
+        "Vickers hardness vs depth. The case-depth threshold at 550 HV is "
+        "drawn in red. Where this curve sits relative to the threshold is the "
+        "entire product decision: too shallow = early fatigue failure; "
+        "too deep = wasted cycle time and distortion."
+    )
+
+    if "quench" in result:
+        q = result["quench"]
+        st.subheader("Phase fractions across the section (CCT-style)")
+        fig = _go_multi(
+            x_mm,
+            {
+                "martensite": (q["f_martensite"], CREAM, None),
+                "pearlite": (q["X_pearlite"], EMBER, None),
+                "bainite": (q["X_bainite"], GOLD, None),
+            },
+            xtitle="depth (mm)",
+            ytitle="volume fraction",
+            yrange=(0, 1.0),
+            legend=True,
+        )
+        st.plotly_chart(fig, width="stretch")
+        st.caption(
+            "Each depth has its own cooling curve, so each depth forms a "
+            "different phase mix. Fast-cooling surface keeps martensite; "
+            "slow-cooling core can form pearlite/bainite. This is the "
+            "'CCT-style' answer: the model now distinguishes local cooling "
+            "rates instead of one part-average curve."
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Sidebar: process controls (with tooltips on everything)
 # --------------------------------------------------------------------------- #
@@ -190,35 +382,63 @@ with st.sidebar:
 
     st.markdown("**Schedule**")
     boost_c = st.slider(
-        "Boost temperature (°C)", 850, 1050, 950, 5,
+        "Boost temperature (°C)",
+        850,
+        1050,
+        950,
+        5,
         help="First-stage soak setpoint. High carbon-potential, high-temperature "
         "boost drives carbon into the surface fast.",
     )
     boost_h = st.slider(
-        "Boost duration (h)", 0.5, 8.0, 2.0, 0.5,
+        "Boost duration (h)",
+        0.5,
+        8.0,
+        2.0,
+        0.5,
         help="Time at boost temperature. Case depth grows roughly as √t.",
     )
     diffuse_c = st.slider(
-        "Diffuse temperature (°C)", 800, 1050, 930, 5,
+        "Diffuse temperature (°C)",
+        800,
+        1050,
+        930,
+        5,
         help="Second-stage setpoint: lets surface carbon redistribute deeper "
         "and the steep near-surface gradient relax toward the target.",
     )
     diffuse_h = st.slider(
-        "Diffuse duration (h)", 0.5, 8.0, 1.0, 0.5,
+        "Diffuse duration (h)",
+        0.5,
+        8.0,
+        1.0,
+        0.5,
         help="Time at diffuse temperature. Longer = flatter, deeper profile.",
     )
     carbon_potential = st.slider(
-        "Carbon potential (mass-%)", 0.6, 1.2, 1.0, 0.01,
+        "Carbon potential (mass-%)",
+        0.6,
+        1.2,
+        1.0,
+        0.01,
         help="Carbon activity of the furnace atmosphere at the surface. "
         "Higher Cp = steeper gradient, faster case build, more soot risk.",
     )
     emissivity = st.slider(
-        "Emissivity", 0.3, 1.0, 0.8, 0.01,
+        "Emissivity",
+        0.3,
+        1.0,
+        0.8,
+        0.01,
         help="Surface radiation efficiency of the load. Drives the thermal "
         "surrogate's heating rate.",
     )
     size_mm = st.slider(
-        "Part size (mm, cross-section)", 6.0, 40.0, 16.0, 1.0,
+        "Part size (mm, cross-section)",
+        6.0,
+        40.0,
+        16.0,
+        1.0,
         help="Characteristic cross-section of the part. Larger parts heat "
         "slower and quench slower — both change the outcome.",
     )
@@ -235,11 +455,19 @@ with st.sidebar:
         "uniform softening.",
     )
     quench_temp_c = st.slider(
-        "Quench bath temperature (°C)", 20, 120, 60, 5,
+        "Quench bath temperature (°C)",
+        20,
+        120,
+        60,
+        5,
         help="Bath temperature. Higher bath = slower final cooling.",
     )
     quench_agitation = st.slider(
-        "Agitation", 0.0, 1.0, 0.5, 0.05,
+        "Agitation",
+        0.0,
+        1.0,
+        0.5,
+        0.05,
         help="Scales the effective film coefficient (0 = still, 1 = vigorous). "
         "More agitation = faster quench = more martensite.",
     )
@@ -247,7 +475,10 @@ with st.sidebar:
     with st.expander("Advanced — surface mass-transfer coefficient (h_m)"):
         h_m = st.number_input(
             "h_m (m/s, log-scale)",
-            min_value=1e-6, max_value=1e-2, value=1.0e-4, step=1e-6,
+            min_value=1e-6,
+            max_value=1e-2,
+            value=1.0e-4,
+            step=1e-6,
             format="%.2e",
             help="Surface gas-to-part mass-transfer coefficient. The furnace "
             "tab now uses the SAME mass_transfer (Robin) BC as the calibration "
@@ -313,66 +544,18 @@ with tab_furnace:
         st.subheader("Process history")
         thermal = result["thermal"]
         t_s = thermal.get("times_s", np.linspace(0, 1, len(np.asarray(thermal["Ts"]))))
-        fig, ax = plt.subplots(figsize=(7, 2.8), facecolor=CHARCOAL)
-        _style_ax(ax, "T (K)", TEMP_YMAX)
-        ax.plot(np.asarray(t_s), np.asarray(thermal["Ts"]),
-                color=EMBER, lw=2, label="surface")
+        series = {"surface": (thermal["Ts"], EMBER, None)}
         if "Tcore" in thermal:
-            ax.plot(np.asarray(t_s), np.asarray(thermal["Tcore"]),
-                    color=GOLD, lw=2, label="core")
-        ax.legend(facecolor=CHARCOAL, labelcolor=CREAM, fontsize=8)
-        st.pyplot(fig)
+            series["core"] = (thermal["Tcore"], GOLD, None)
+        fig = _go_multi(t_s, series, ytitle="T (K)", yrange=(0, TEMP_YMAX), legend=True)
+        st.plotly_chart(fig, width="stretch")
         st.caption(
             "Furnace temperature history. The boost segment holds the part near "
             "the high setpoint; the diffuse segment lets the profile redistribute. "
             "Core lags surface on heating (thermal inertia)."
         )
 
-        st.subheader("Carbon profile (end of cycle)")
-        fig, ax = plt.subplots(figsize=(7, 2.8), facecolor=CHARCOAL)
-        _style_ax(ax, "C (mass-%)", CARBON_YMAX)
-        ax.plot(np.asarray(result["x_mm"]), np.asarray(result["carbon"]["C_final"]),
-                color=GOLD, lw=2)
-        ax.axhline(carbon_potential, color=CREAM, ls="--", lw=0.8, alpha=0.5)
-        st.pyplot(fig)
-        st.caption(
-            "Carbon concentration vs depth at cycle end. The dashed line is the "
-            "atmosphere carbon potential. A steeper near-surface gradient is what "
-            "short soak times produce; diffuse stages flatten it."
-        )
-
-        st.subheader("Hardness profile")
-        fig, ax = plt.subplots(figsize=(7, 2.8), facecolor=CHARCOAL)
-        _style_ax(ax, "H (HV)", HARD_YMAX)
-        ax.plot(np.asarray(result["x_mm"]), np.asarray(result["H"]), color=CREAM, lw=2)
-        ax.axhline(550.0, color=EMBER, ls="--", lw=1.0)
-        ax.text(0.02, 560, "550 HV (ISO 2639 ECD threshold)", color=EMBER, fontsize=8)
-        st.pyplot(fig)
-        st.caption(
-            "Vickers hardness vs depth. The case-depth threshold at 550 HV is "
-            "drawn in red. Where this curve sits relative to the threshold is the "
-            "entire product decision: too shallow = early fatigue failure; "
-            "too deep = wasted cycle time and distortion."
-        )
-
-        if "quench" in result:
-            st.subheader("Phase fractions across the section (CCT-style)")
-            fig, ax = plt.subplots(figsize=(7, 2.8), facecolor=CHARCOAL)
-            _style_ax(ax, "volume fraction", 1.0)
-            xq = np.asarray(result["x_mm"])
-            q = result["quench"]
-            ax.plot(xq, np.asarray(q["f_martensite"]), color=CREAM, lw=2, label="martensite")
-            ax.plot(xq, np.asarray(q["X_pearlite"]), color=EMBER, lw=2, label="pearlite")
-            ax.plot(xq, np.asarray(q["X_bainite"]), color=GOLD, lw=2, label="bainite")
-            ax.legend(facecolor=CHARCOAL, labelcolor=CREAM, fontsize=8)
-            st.pyplot(fig)
-            st.caption(
-                "Each depth has its own cooling curve, so each depth forms a "
-                "different phase mix. Fast-cooling surface keeps martensite; "
-                "slow-cooling core can form pearlite/bainite. This is the "
-                "'CCT-style' answer: the model now distinguishes local cooling "
-                "rates instead of one part-average curve."
-            )
+        render_profile_plots(result, carbon_potential)
 
     with right:
         st.subheader("Case-Depth Dial")
@@ -393,7 +576,9 @@ with tab_furnace:
                 "plot below."
             )
         else:
-            st.caption("Instant-quench path (legacy). Enable a quench medium to see bainite/pearlite effects.")
+            st.caption(
+                "Instant-quench path (legacy). Enable a quench medium to see bainite/pearlite effects."
+            )
 
 # --------------------------------------------------------------------------- #
 # Tab 2 — Cycle Predictor (Bayesian calibration)
@@ -424,10 +609,12 @@ with tab_predict:
         "full-martensite traverses.",
     )
     chains = st.number_input("Chains", 1, 4, 2, 1, help="MCMC chains (CPU cost ×chains).")
-    draws = st.number_input("Draws per chain", 50, 500, 150, 10,
-                            help="Posterior samples per chain.")
-    warmup = st.number_input("Warmup", 50, 500, 100, 10,
-                             help="Adaptation draws per chain (discarded).")
+    draws = st.number_input(
+        "Draws per chain", 50, 500, 150, 10, help="Posterior samples per chain."
+    )
+    warmup = st.number_input(
+        "Warmup", 50, 500, 100, 10, help="Adaptation draws per chain (discarded)."
+    )
     run_cal = st.button("Run calibration", type="secondary")
 
     if run_cal and uploaded is None:
@@ -474,17 +661,15 @@ with tab_predict:
             if report.has_trajectory and report.trajectory is not None:
                 from ingest.plc_parser import schedule_from_trajectory
 
-                sched = schedule_from_trajectory(
-                    report.trajectory["t_s"], report.trajectory["T_C"]
-                )
+                sched = schedule_from_trajectory(report.trajectory["t_s"], report.trajectory["T_C"])
                 scenario = Scenario(
                     alloy=alloy_label,
                     t_total=float(sched["schedule_times"][-1]),
                     schedule_times=tuple(sched["schedule_times"]),
                     schedule_temps_C=tuple(sched["schedule_temps_C"]),
                     thermal_n=21,
-                    carbon_n=41,      # light grid — see runtime warning above
-                    carbon_dt=8.0,    # light grid
+                    carbon_n=41,  # light grid — see runtime warning above
+                    carbon_dt=8.0,  # light grid
                     carbon_mode="mass_transfer",  # h_m must be exercised (see calibrate.py)
                     quench_medium=None if cal_quench.startswith("none") else cal_quench,
                     quench_temp_K=333.15,
@@ -502,8 +687,8 @@ with tab_predict:
                     schedule_times=(0.0, 7200.0),
                     schedule_temps_C=(950.0, 950.0),
                     thermal_n=21,
-                    carbon_n=41,      # light grid — see runtime warning above
-                    carbon_dt=8.0,    # light grid
+                    carbon_n=41,  # light grid — see runtime warning above
+                    carbon_dt=8.0,  # light grid
                     carbon_mode="mass_transfer",  # h_m must be exercised (see calibrate.py)
                     quench_medium=None if cal_quench.startswith("none") else cal_quench,
                     quench_temp_K=333.15,
@@ -538,16 +723,21 @@ with tab_predict:
                 )
             st.dataframe(rows)
             st.subheader("Posterior marginals")
-            fig, axes = plt.subplots(1, len(samples), figsize=(2.4 * len(samples), 2.6), facecolor=CHARCOAL)
-            if len(samples) == 1:
-                axes = [axes]
-            for ax, (name, vals) in zip(axes, samples.items()):
-                ax.hist(np.asarray(vals), bins=20, color=GOLD, alpha=0.85)
-                ax.set_title(name, color="white", fontsize=9)
-                ax.tick_params(colors="white", labelsize=7)
-                ax.set_facecolor(CHARCOAL)
-            fig.tight_layout()
-            st.pyplot(fig)
+            cols = st.columns(min(len(samples), 3))
+            for idx, (name, vals) in enumerate(samples.items()):
+                with cols[idx % 3]:
+                    fig = _go_fig(height=220)
+                    fig.add_trace(
+                        go.Histogram(
+                            x=np.asarray(vals, dtype=float),
+                            nbinsx=20,
+                            marker_color=GOLD,
+                            name=name,
+                        )
+                    )
+                    fig.update_yaxes(title_text="draws")
+                    st.plotly_chart(fig, width="stretch")
+                    st.caption(name)
             st.caption(
                 "Posterior distributions over the five process parameters. "
                 "A tight, single-peaked histogram means the traverse pins that "
@@ -563,22 +753,56 @@ with tab_predict:
                 from calibration.calibrate import posterior_predictive_hardness
 
                 ppc = posterior_predictive_hardness(mcmc, depths, scenario, n_draws=120)
-                fig, ax = plt.subplots(figsize=(7, 3.2), facecolor=CHARCOAL)
-                ax.set_facecolor(CHARCOAL)
-                ax.plot(ppc["obs_depths"], H, "o", color=GOLD, ms=5, label="observed")
-                ax.plot(ppc["obs_depths"], ppc["H_mean"], color=CREAM, lw=2, label="posterior mean")
-                ax.fill_between(
-                    ppc["obs_depths"], ppc["H_lo"], ppc["H_hi"],
-                    color=CREAM, alpha=0.25, label="5-95% credible band",
+                od = np.asarray(ppc["obs_depths"], dtype=float)
+                fig = _go_fig(height=320)
+                fig.add_trace(
+                    go.Scatter(
+                        x=od,
+                        y=np.asarray(ppc["H_lo"], dtype=float),
+                        mode="lines",
+                        line=dict(width=0),
+                        showlegend=False,
+                        hoverinfo="skip",
+                    )
                 )
-                ax.set_xlabel("depth (mm)", color="white", fontsize=9)
-                ax.set_ylabel("hardness (HV)", color="white", fontsize=9)
-                ax.tick_params(colors="white", labelsize=8)
-                for spine in ax.spines.values():
-                    spine.set_color("#444444")
-                ax.legend(facecolor=CHARCOAL, labelcolor=CREAM, fontsize=8)
-                fig.tight_layout()
-                st.pyplot(fig)
+                fig.add_trace(
+                    go.Scatter(
+                        x=od,
+                        y=np.asarray(ppc["H_hi"], dtype=float),
+                        mode="lines",
+                        line=dict(width=0),
+                        fill="tonexty",
+                        fillcolor="rgba(239,233,221,0.22)",
+                        name="5-95% credible band",
+                        hovertemplate="5-95% band<extra></extra>",
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=od,
+                        y=np.asarray(ppc["H_mean"], dtype=float),
+                        mode="lines",
+                        line=dict(color=CREAM, width=2),
+                        name="posterior mean",
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=od,
+                        y=np.asarray(H, dtype=float),
+                        mode="markers",
+                        marker=dict(color=GOLD, size=7),
+                        name="observed",
+                    )
+                )
+                fig.update_xaxes(title_text="depth (mm)")
+                fig.update_yaxes(title_text="hardness (HV)")
+                fig.update_layout(
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5),
+                    margin=dict(l=40, r=16, t=24, b=70),
+                )
+                st.plotly_chart(fig, width="stretch")
                 resid = np.asarray(H) - ppc["H_mean"]
                 st.caption(
                     f"Posterior predictive check — max |residual| = "
@@ -589,17 +813,21 @@ with tab_predict:
                 )
 
                 # residual structure check (review 2): are residuals random?
-                fig, ax = plt.subplots(figsize=(7, 2.4), facecolor=CHARCOAL)
-                ax.set_facecolor(CHARCOAL)
-                ax.axhline(0.0, color="#444444", lw=1)
-                ax.plot(depths, resid, "o-", color=EMBER, ms=4, lw=1)
-                ax.set_xlabel("depth (mm)", color="white", fontsize=9)
-                ax.set_ylabel("residual (HV)", color="white", fontsize=9)
-                ax.tick_params(colors="white", labelsize=8)
-                for spine in ax.spines.values():
-                    spine.set_color("#444444")
-                fig.tight_layout()
-                st.pyplot(fig)
+                fig = _go_fig(height=240)
+                fig.add_trace(
+                    go.Scatter(
+                        x=np.asarray(depths, dtype=float),
+                        y=resid,
+                        mode="lines+markers",
+                        line=dict(color=EMBER, width=1),
+                        marker=dict(color=EMBER, size=5),
+                        name="residual",
+                    )
+                )
+                fig.add_hline(y=0.0, line=dict(color="#555", width=1))
+                fig.update_xaxes(title_text="depth (mm)")
+                fig.update_yaxes(title_text="residual (HV)")
+                st.plotly_chart(fig, width="stretch")
                 slope = np.polyfit(depths, resid, 1)[0]
                 st.caption(
                     f"Residuals vs depth — trend slope {slope:+.2f} HV/mm. "
@@ -644,33 +872,12 @@ with tab_cct:
             th_preset = load_alloy("8620")
         curve = ttt_start_times(th_preset, X=0.01)
 
-        fig, ax = plt.subplots(figsize=(8.5, 5), facecolor=CHARCOAL)
-        ax.set_facecolor(CHARCOAL)
-        ax.set_xscale("log")
-        ax.set_xlim(1e-1, 1e4)
-        ax.set_ylim(200, 1200)
-        ax.set_xlabel("time (s, log)", color="white", fontsize=10)
-        ax.set_ylabel("temperature (K)", color="white", fontsize=10)
-        ax.tick_params(colors="white", labelsize=8)
-        for spine in ax.spines.values():
-            spine.set_color("#444444")
-
-        T = np.asarray(curve["T"])
-        ax.plot(np.asarray(curve["t_pearlite_s"]), T, color=EMBER, lw=2.2,
-                label=f"pearlite start (nose {PEARLITE_NOSE_K - 273.15:.0f} °C)")
-        ax.plot(np.asarray(curve["t_bainite_s"]), T, color=GOLD, lw=2.2,
-                label=f"bainite start (nose {BAINITE_NOSE_K - 273.15:.0f} °C)")
-
         # Ms lines (surface/core carbon)
         C_final = np.asarray(result["carbon"]["C_final"])
         C_surf = float(C_final[0])
         C_core = float(C_final[-1])
         Ms_surf = float(ms_andrews(C_surf, th_preset["ms"]["A"], th_preset["ms"]["b_carbon"]))
         Ms_core = float(ms_andrews(C_core, th_preset["ms"]["A"], th_preset["ms"]["b_carbon"]))
-        ax.axhline(Ms_surf, color="#8aa07f", ls=":", lw=1.4,
-                   label=f"Ms (surface C={C_surf:.2f})")
-        ax.axhline(Ms_core, color="#8aa07f", ls="--", lw=1.4,
-                   label=f"Ms (core C={C_core:.2f})")
 
         # cooling curves at surface / mid / core from the spatial quench
         Thist = np.asarray(q["cooling_history"])
@@ -678,13 +885,59 @@ with tab_cct:
         n_therm = Thist.shape[1]
         mid = n_therm // 2
         core = n_therm - 1
-        ax.plot(ts, Thist[:, 0], color=CREAM, lw=2.0, label="cooling: surface")
-        ax.plot(ts, Thist[:, mid], color="#b0b8c0", lw=2.0, ls="--", label="cooling: mid-radius")
-        ax.plot(ts, Thist[:, core], color="#6f7780", lw=2.0, ls="-.", label="cooling: core")
 
-        ax.legend(facecolor=CHARCOAL, labelcolor=CREAM, fontsize=8, loc="upper right")
-        fig.tight_layout()
-        st.pyplot(fig)
+        fig = _go_fig(height=460)
+        fig.update_xaxes(type="log", range=[np.log10(1e-1), np.log10(1e4)])
+        fig.update_yaxes(range=[200, 1200])
+        fig.update_xaxes(title_text="time (s, log)")
+        fig.update_yaxes(title_text="temperature (K)")
+        for name, x, y, color, dash in [
+            (
+                f"pearlite start (nose {PEARLITE_NOSE_K - 273.15:.0f} C)",
+                curve["t_pearlite_s"],
+                curve["T"],
+                EMBER,
+                None,
+            ),
+            (
+                f"bainite start (nose {BAINITE_NOSE_K - 273.15:.0f} C)",
+                curve["t_bainite_s"],
+                curve["T"],
+                GOLD,
+                None,
+            ),
+            ("cooling: surface", ts, Thist[:, 0], CREAM, None),
+            ("cooling: mid-radius", ts, Thist[:, mid], "#b0b8c0", "dash"),
+            ("cooling: core", ts, Thist[:, core], "#6f7780", "dashdot"),
+        ]:
+            fig.add_trace(
+                go.Scatter(
+                    x=np.asarray(x, dtype=float),
+                    y=np.asarray(y, dtype=float),
+                    mode="lines",
+                    line=dict(color=color, width=2, dash=dash or "solid"),
+                    name=name,
+                )
+            )
+        fig.add_hline(
+            y=Ms_surf,
+            line=dict(color="#8aa07f", dash="dot", width=1.2),
+            annotation_text=f"Ms surface (C={C_surf:.2f})",
+            annotation_font_size=10,
+        )
+        fig.add_hline(
+            y=Ms_core,
+            line=dict(color="#8aa07f", dash="dash", width=1.2),
+            annotation_text=f"Ms core (C={C_core:.2f})",
+            annotation_font_size=10,
+        )
+        fig.update_layout(
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5),
+            margin=dict(l=40, r=16, t=24, b=80),
+        )
+
+        st.plotly_chart(fig, width="stretch")
         st.caption(
             "Read it like a metallurgist: a cooling curve that stays right of a "
             "nose for a long time accumulates diffusional fraction (soft); one "
@@ -724,18 +977,29 @@ with tab_ingest:
 
         content = log_file.read().decode("utf-8", errors="replace")
         report = parse_plc_log(log_file.name, text=content)
-        st.info(f"Rows used: {report.rows_used}/{report.rows_total} · temp unit: {report.temperature_unit}")
+        st.info(
+            f"Rows used: {report.rows_used}/{report.rows_total} · temp unit: {report.temperature_unit}"
+        )
         for w in report.warnings:
             st.warning(w)
         if report.has_trajectory:
             traj = report.trajectory
             assert traj is not None
             st.subheader("Extracted trajectory")
-            st.line_chart(
-                {
-                    "T (°C)": traj["T_C"],
-                }
+            t_traj = np.asarray(traj["t_s"], dtype=np.float64) / 3600.0
+            fig = _go_fig(height=280)
+            fig.add_trace(
+                go.Scatter(
+                    x=t_traj,
+                    y=np.asarray(traj["T_C"], dtype=np.float64),
+                    mode="lines",
+                    line=dict(color=EMBER, width=2),
+                    name="T",
+                )
             )
+            fig.update_xaxes(title_text="time (h)")
+            fig.update_yaxes(title_text="T (°C)")
+            st.plotly_chart(fig, width="stretch")
             sched = schedule_from_trajectory(traj["t_s"], traj["T_C"])
             st.subheader("Compressed schedule (RDP knots)")
             st.dataframe(
@@ -748,11 +1012,72 @@ with tab_ingest:
                 "Ramer-Douglas-Peucker line simplification preserves heating "
                 "and cooling ramps as diagonal segments (linear interpolation "
                 "reproduces them exactly) instead of chopping them into a "
-                "staircase of flat soaks. These knots feed directly into the "
-                "Scenario — the Cycle Predictor tab now calibrates against "
-                "what the furnace actually did, not a hardcoded 2 h / 950 °C "
-                "default."
+                "staircase of flat soaks."
             )
+
+            st.divider()
+            st.subheader("Replay this schedule through the full model")
+            c1, c2 = st.columns(2)
+            with c1:
+                ing_quench = st.selectbox(
+                    "Quench medium (ingested run)",
+                    ["oil", "water", "polymer", "air"],
+                    index=0,
+                    key="ing_quench",
+                    help="Quench applied after the ingested schedule completes.",
+                )
+                ing_size = st.slider("Part size (mm)", 6.0, 40.0, 16.0, 1.0, key="ing_size")
+            with c2:
+                st.metric(
+                    "Ingested cycle",
+                    f"{float(sched['schedule_times'][-1]) / 3600.0:.2f} h",
+                    help="Total time from the last RDP knot.",
+                )
+                run_ing = st.button(
+                    "Run emulation with this schedule",
+                    type="primary",
+                    key="run_ing",
+                )
+            if run_ing:
+                with st.spinner(
+                    "Replaying the ingested schedule through the full forward model..."
+                ):
+                    res_ing = run_emulation_with_schedule(
+                        preset if preset is not None else load_alloy(alloy_choice),
+                        alloy_label,
+                        list(sched["schedule_times"]),
+                        list(sched["schedule_temps_C"]),
+                        size_mm=ing_size,
+                        quench_medium=ing_quench,
+                        quench_temp_c=quench_temp_c,
+                        quench_agitation=quench_agitation,
+                        carbon_potential=carbon_potential,
+                        emissivity=emissivity,
+                        h_m=h_m,
+                    )
+                st.session_state["ingest_result"] = res_ing
+            if "ingest_result" in st.session_state:
+                res_ing = st.session_state["ingest_result"]
+                col_l, col_r = st.columns([1.5, 1])
+                with col_l:
+                    render_profile_plots(res_ing, carbon_potential)
+                with col_r:
+                    st.subheader("Case-Depth Dial (ingested schedule)")
+                    st.pyplot(dial_gauge(float(res_ing["ecd_mm"])))
+                    st.metric("Surface hardness", f"{float(res_ing['H'][0]):.0f} HV")
+                    st.metric("Core hardness", f"{float(res_ing['H'][-1]):.0f} HV")
+                    if "quench" in res_ing:
+                        qi = res_ing["quench"]
+                        st.metric(
+                            "Surface martensite", f"{float(qi['f_martensite'][0]) * 100:.0f} %"
+                        )
+                        st.metric("Core martensite", f"{float(qi['f_martensite'][-1]) * 100:.0f} %")
+                    st.caption(
+                        "Same pipeline, same mass-transfer BC, same sidebar "
+                        "quench/emissivity/h_m settings — only the schedule "
+                        "comes from the PLC log. The Cycle Predictor tab uses "
+                        "this same trajectory for calibration."
+                    )
         if report.has_traverse and report.traverse is not None:
             trav_ingest = report.traverse
             st.subheader("Extracted traverse")
@@ -762,5 +1087,15 @@ with tab_ingest:
                     "hardness (HV)": trav_ingest["hardness_HV"],
                 }
             )
+            if not report.has_trajectory:
+                st.info(
+                    "This file is a **hardness traverse** (depth vs hardness), not a "
+                    "time/temperature schedule — so there is no 'run emulation' here: "
+                    "a traverse has no thermal history to replay. It **is** calibration "
+                    "data though: open the **Cycle Predictor** tab, upload this same "
+                    "file, and run the NUTS calibration against it. To get an "
+                    "'emulate this schedule' button, upload a PLC log with time + "
+                    "temperature columns (e.g. `timestamp, furnace_temp`)."
+                )
         if not report.has_trajectory and not report.has_traverse:
             st.error("No recognizable time/temperature or depth/hardness columns found.")

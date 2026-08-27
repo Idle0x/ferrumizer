@@ -27,6 +27,7 @@ Geometry (200-unit canvas, center C=(100,100); screen coords, y down):
 - lockups: mark geometry inlined (not <image> refs) at translate(80,10);
   wordmark baseline 117, tagline 149 (optically mid-band, >=40u margins).
 """
+
 import math
 from pathlib import Path
 
@@ -37,10 +38,12 @@ CHARCOAL = "#16181C"
 OFFWHITE = "#F3F0EA"
 CREAM = "#EFE6CF"
 
-STOPS = ('<stop offset="0" stop-color="#C8A76E"/><stop offset=".26" '
-         'stop-color="#A05F30"/><stop offset=".55" stop-color="#5D3320"/>'
-         '<stop offset=".82" stop-color="#2B2723"/><stop offset="1" '
-         'stop-color="#1D1F23"/>')
+STOPS = (
+    '<stop offset="0" stop-color="#C8A76E"/><stop offset=".26" '
+    'stop-color="#A05F30"/><stop offset=".55" stop-color="#5D3320"/>'
+    '<stop offset=".82" stop-color="#2B2723"/><stop offset="1" '
+    'stop-color="#1D1F23"/>'
+)
 
 
 def grad(gid: str) -> str:
@@ -143,14 +146,21 @@ def main():
 
     import cairosvg
 
-    for name, w in (("mark", 600), ("mark-mono-dark", 400), ("favicon", 256),
-                    ("lockup-dark", 1280), ("lockup-light", 1280)):
-        cairosvg.svg2png(url=str(out / f"{name}.svg"),
-                         write_to=str(out / f"{name}.png"), output_width=w)
+    for name, w in (
+        ("mark", 600),
+        ("mark-mono-dark", 400),
+        ("favicon", 256),
+        ("lockup-dark", 1280),
+        ("lockup-light", 1280),
+    ):
+        cairosvg.svg2png(
+            url=str(out / f"{name}.svg"), write_to=str(out / f"{name}.png"), output_width=w
+        )
     for name in ("mark", "mark-mono-dark", "favicon", "lockup-dark", "lockup-light"):
         for w in (512, 1024):
-            cairosvg.svg2png(url=str(out / f"{name}.svg"),
-                             write_to=str(out / f"{name}-{w}.png"), output_width=w)
+            cairosvg.svg2png(
+                url=str(out / f"{name}.svg"), write_to=str(out / f"{name}-{w}.png"), output_width=w
+            )
     print("wrote 5 SVGs + PNG exports")
 
 

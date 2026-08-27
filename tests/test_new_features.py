@@ -35,7 +35,9 @@ class TestQuenchModel:
 
     def test_water_quench_preserves_martensite(self):
         """Fast quench keeps most austenite as martensite -> full case."""
-        sc = Scenario(quench_medium="water", quench_temp_K=298.15, quench_agitation=0.8, size_mm=16.0)
+        sc = Scenario(
+            quench_medium="water", quench_temp_K=298.15, quench_agitation=0.8, size_mm=16.0
+        )
         res = FerrumizerPipeline(sc, ProcessParams()).forward()
         assert float(res["quench"]["X_diffusional"][0]) < 0.05
         assert float(res["f_martensite"][0]) > 0.9
@@ -43,9 +45,14 @@ class TestQuenchModel:
 
     def test_medium_ranking(self):
         """Slower media must produce more diffusional phases (air > oil > water)."""
+
         def xdiff(medium, ag):
-            sc = Scenario(quench_medium=medium, quench_temp_K=333.15, quench_agitation=ag, size_mm=16.0)
-            return float(FerrumizerPipeline(sc, ProcessParams()).forward()["quench"]["X_diffusional"][0])
+            sc = Scenario(
+                quench_medium=medium, quench_temp_K=333.15, quench_agitation=ag, size_mm=16.0
+            )
+            return float(
+                FerrumizerPipeline(sc, ProcessParams()).forward()["quench"]["X_diffusional"][0]
+            )
 
         assert xdiff("air", 0.2) > xdiff("oil", 0.3)
         assert xdiff("oil", 0.3) > xdiff("water", 0.8)
@@ -53,7 +60,9 @@ class TestQuenchModel:
     def test_depth_resolved_phases(self):
         """Spatial quench: surface and core must see different cooling rates
         (phase fractions differ across the section for a fast quench)."""
-        sc = Scenario(quench_medium="water", quench_temp_K=298.15, quench_agitation=0.8, size_mm=16.0)
+        sc = Scenario(
+            quench_medium="water", quench_temp_K=298.15, quench_agitation=0.8, size_mm=16.0
+        )
         res = FerrumizerPipeline(sc, ProcessParams()).forward()
         q = res["quench"]
         # per-depth arrays, not scalars
@@ -64,7 +73,11 @@ class TestQuenchModel:
     def test_cooling_curve_differentiable(self):
         """newton_cooling_curve must be JAX-differentiable."""
         T = newton_cooling_curve(1223.0, 333.0, 900.0, 5.46e6, 0.008, jnp.linspace(0, 600, 50), 0.5)
-        g = jax.grad(lambda h: jnp.sum(newton_cooling_curve(1223.0, 333.0, h, 5.46e6, 0.008, jnp.linspace(0, 600, 50), 0.5)))(900.0)
+        g = jax.grad(
+            lambda h: jnp.sum(
+                newton_cooling_curve(1223.0, 333.0, h, 5.46e6, 0.008, jnp.linspace(0, 600, 50), 0.5)
+            )
+        )(900.0)
         assert jnp.isfinite(g)
         assert jnp.all(T >= 333.0 - 1e-9)  # never below bath temp
 

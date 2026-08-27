@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "components" / "sha
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app"))
 
 import jax
+
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
@@ -58,9 +59,13 @@ def generate(seed: int = 42):
     )
 
     out = fast_forward(
-        jnp.float64(log_D0), jnp.float64(Q_kJ), jnp.float64(C_pot),
-        jnp.float64(h_m), jnp.float64(eps),
-        schedule_knots=knots, **kwargs,
+        jnp.float64(log_D0),
+        jnp.float64(Q_kJ),
+        jnp.float64(C_pot),
+        jnp.float64(h_m),
+        jnp.float64(eps),
+        schedule_knots=knots,
+        **kwargs,
     )
 
     x_mm = np.asarray(out["x_mm"])

@@ -91,7 +91,14 @@ def ms_temperature(preset: dict, carbon_wt_pct: float) -> float:
 # This is the published correction the review demanded for custom alloys.
 LEE2011_R = 8.314e-3  # kJ/(mol K)
 LEE2011_K1 = {"Mn": -0.0315, "Si": 0.0509, "Ni": -0.0085, "Cr": 0.0, "Mo": 0.3031, "Al": -0.0520}
-LEE2011_K2 = {"Mn": -4.3663, "Si": 4.0507, "Ni": -1.2407, "Cr": 7.7260, "Mo": 12.1266, "Al": -6.7886}
+LEE2011_K2 = {
+    "Mn": -4.3663,
+    "Si": 4.0507,
+    "Ni": -1.2407,
+    "Cr": 7.7260,
+    "Mo": 12.1266,
+    "Al": -6.7886,
+}
 
 
 def carbon_diffusivity_lee2011(T_K, C_wt_pct, comp: dict) -> float:

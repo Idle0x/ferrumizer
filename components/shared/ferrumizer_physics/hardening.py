@@ -50,10 +50,20 @@ H_RA_DEFAULT = 300.0  # HV, retained austenite is soft (~300 HV)
 # end reads ~430 HV (~43 HRC), and hardness climbs steeply with C to
 # ~0.8-1.0 % C before the retained-austenite roll-off.
 MARTENSITE_HV_ANCHORS = (
-    (0.05, 220.0), (0.10, 300.0), (0.15, 360.0), (0.20, 430.0),
-    (0.25, 470.0), (0.30, 505.0), (0.35, 535.0), (0.40, 565.0),
-    (0.50, 610.0), (0.60, 655.0), (0.70, 690.0), (0.80, 720.0),
-    (0.90, 740.0), (1.00, 755.0),
+    (0.05, 220.0),
+    (0.10, 300.0),
+    (0.15, 360.0),
+    (0.20, 430.0),
+    (0.25, 470.0),
+    (0.30, 505.0),
+    (0.35, 535.0),
+    (0.40, 565.0),
+    (0.50, 610.0),
+    (0.60, 655.0),
+    (0.70, 690.0),
+    (0.80, 720.0),
+    (0.90, 740.0),
+    (1.00, 755.0),
 )
 
 
@@ -117,10 +127,7 @@ def _pchip(xs, ys, x):
     h10 = t3 - 2.0 * t2 + t
     h01 = -2.0 * t3 + 3.0 * t2
     h11 = t3 - t2
-    return (
-        h00 * ys[idx] + h10 * h[idx] * m[idx]
-        + h01 * ys[idx + 1] + h11 * h[idx] * m[idx + 1]
-    )
+    return h00 * ys[idx] + h10 * h[idx] * m[idx] + h01 * ys[idx + 1] + h11 * h[idx] * m[idx + 1]
 
 
 def _slope_endpoint(d_first, d_second):
@@ -256,12 +263,7 @@ def mix_phase_hardness(f_mart, f_bainite, f_pearlite, preset, H_mart, C=None):
     else:
         H_pearl = H_pearl_full
     f_rest = 1.0 - f_mart - f_bainite - f_pearlite
-    H = (
-        f_mart * H_mart
-        + f_bainite * H_bain
-        + f_pearlite * H_pearl
-        + f_rest * h["Hcore"]
-    )
+    H = f_mart * H_mart + f_bainite * H_bain + f_pearlite * H_pearl + f_rest * h["Hcore"]
     return H
 
 
@@ -359,10 +361,10 @@ def ttt_start_times(preset: dict, X: float = 0.01, T_grid=None):
 # spots and out-of-spec case depth in production. This model computes a
 # lumped Newton cooling curve and integrates Scheil-JMAK C-curves over it.
 QUENCH_MEDIA_H = {
-    "air": 50.0,        # W/m^2/K  — still air, slow
-    "oil": 900.0,       # W/m^2/K  — typical quench oil
+    "air": 50.0,  # W/m^2/K  — still air, slow
+    "oil": 900.0,  # W/m^2/K  — typical quench oil
     "polymer": 1800.0,  # W/m^2/K  — polymer quenchant (PVP type)
-    "water": 3500.0,    # W/m^2/K  — agitated water
+    "water": 3500.0,  # W/m^2/K  — agitated water
 }
 # Medium-specific C-curve noses (K) for the two diffusional phases
 # (pearlite ~600 C, bainite ~450 C for low-alloy carburizing steels).
@@ -452,8 +454,9 @@ def quench_fractions(
     X_diff = X_pearlite + X_bainite
 
     # surviving austenite -> martensite (Mf cutoff applied inside KM)
-    f_mart = (1.0 - X_diff) * km_fraction(Ms, T_quench, preset["km_alpha"],
-                                 preset.get("mf_offset_K", MF_OFFSET_K))
+    f_mart = (1.0 - X_diff) * km_fraction(
+        Ms, T_quench, preset["km_alpha"], preset.get("mf_offset_K", MF_OFFSET_K)
+    )
 
     # phase-specific rule of mixtures — bainite/pearlite priced at their
     # own hardness, not collapsed into Hcore
@@ -515,8 +518,9 @@ def quench_fractions_depth(
     X_bainite = (1.0 - X_pearlite) * X_bainite_raw
     X_diff = X_pearlite + X_bainite
 
-    f_mart = (1.0 - X_diff) * km_fraction(Ms, T_quench, preset["km_alpha"],
-                                 preset.get("mf_offset_K", MF_OFFSET_K))
+    f_mart = (1.0 - X_diff) * km_fraction(
+        Ms, T_quench, preset["km_alpha"], preset.get("mf_offset_K", MF_OFFSET_K)
+    )
 
     h = preset["hardness"]
     H_mart = hardness_profile(C, preset, None)

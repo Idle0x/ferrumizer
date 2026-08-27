@@ -364,7 +364,9 @@ def run_quench_thermal(
 
     T_final, T_hist_blocks = jax.lax.scan(collect_step, T0, jnp.arange(n_blocks))
     T_hist = jnp.concatenate([T0[None, :], T_hist_blocks], axis=0)
-    times_s = jnp.concatenate([jnp.zeros(1, dtype=jnp.float64), (jnp.arange(n_blocks) + 1) * (m * cfg.dt)])
+    times_s = jnp.concatenate(
+        [jnp.zeros(1, dtype=jnp.float64), (jnp.arange(n_blocks) + 1) * (m * cfg.dt)]
+    )
     Ts = T_hist[:, surf_idx]
     Tcore = T_hist[:, core_idx]
 

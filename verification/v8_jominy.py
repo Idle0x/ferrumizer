@@ -49,19 +49,32 @@ from ferrumizer_physics.thermal import ThermalConfig, run_quench_thermal, stabil
 # and the full H-band (min, max) used for the spec-based PASS criterion.
 # A model that reproduces the H-band at every standard position has
 # validated the quench/JMAK physics against independent measured data.
-JOMINY_POSITIONS_MM = np.array([1.5, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0,
-                                20.0, 25.0, 30.0, 35.0, 40.0])
-JOMINY_8620H_MIDBAND_HRC = np.array([44.0, 42.0, 39.0, 36.0, 33.0, 31.0,
-                                     29.0, 27.0, 24.0, 22.0, 20.0, 19.0, 18.0])
+JOMINY_POSITIONS_MM = np.array(
+    [1.5, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0]
+)
+JOMINY_8620H_MIDBAND_HRC = np.array(
+    [44.0, 42.0, 39.0, 36.0, 33.0, 31.0, 29.0, 27.0, 24.0, 22.0, 20.0, 19.0, 18.0]
+)
 # 8620H hardenability band (SAE J1868 / ASM Vol. 4), HRC min/max at each
 # standard position. Jominy specs are written against bands — the PASS
 # criterion is full-band membership, not a single mid-band line.
-JOMINY_8620H_BAND = np.array([
-    (40.0, 45.0), (38.0, 44.0), (34.0, 41.0), (30.0, 38.0),
-    (27.0, 35.0), (24.0, 33.0), (22.0, 31.0), (20.0, 29.0),
-    (18.0, 26.0), (16.0, 24.0), (15.0, 22.0), (14.0, 21.0),
-    (13.0, 20.0),
-])
+JOMINY_8620H_BAND = np.array(
+    [
+        (40.0, 45.0),
+        (38.0, 44.0),
+        (34.0, 41.0),
+        (30.0, 38.0),
+        (27.0, 35.0),
+        (24.0, 33.0),
+        (22.0, 31.0),
+        (20.0, 29.0),
+        (18.0, 26.0),
+        (16.0, 24.0),
+        (15.0, 22.0),
+        (14.0, 21.0),
+        (13.0, 20.0),
+    ]
+)
 
 # ASTM A255 water jet: 12.5 mm orifice, 2.5 m/s free jet, 24 C. The film
 # coefficient at the quenched face is high (~5 kW/m^2/K) and documented for
@@ -82,11 +95,19 @@ JOMINY_BAR_DIA_MM = 25.0
 JOMINY_T_BATH_K = 24.0 + 273.15
 
 # HRC <- HV conversion (ASTM E140 anchor points, linear interpolation).
-HV_HRC_ANCHORS = np.array([
-    (180.0, 5.0), (230.0, 20.0), (300.0, 30.0), (350.0, 35.0),
-    (400.0, 40.0), (450.0, 44.0), (500.0, 48.0), (600.0, 55.2),
-    (700.0, 60.0),
-])
+HV_HRC_ANCHORS = np.array(
+    [
+        (180.0, 5.0),
+        (230.0, 20.0),
+        (300.0, 30.0),
+        (350.0, 35.0),
+        (400.0, 40.0),
+        (450.0, 44.0),
+        (500.0, 48.0),
+        (600.0, 55.2),
+        (700.0, 60.0),
+    ]
+)
 
 
 def hv_to_hrc(hv) -> jnp.ndarray:
@@ -135,9 +156,7 @@ def run_jominy(preset: dict | None = None, n_thermal: int = 161) -> dict:
     Ms = ms_andrews(C_profile, preset["ms"]["A"], preset["ms"]["b_carbon"])
 
     dt_q = float(cfg.dt * cfg.sample_every)
-    qf = quench_fractions_depth(
-        C_profile, Ms, preset, T_history, dt=dt_q, T_quench=JOMINY_T_BATH_K
-    )
+    qf = quench_fractions_depth(C_profile, Ms, preset, T_history, dt=dt_q, T_quench=JOMINY_T_BATH_K)
 
     x_mm = np.linspace(0.0, JOMINY_BAR_LENGTH_MM, n_thermal)
     H = np.asarray(qf["H"])
@@ -183,13 +202,14 @@ def main() -> None:
     r = run_jominy(preset)
     print(f"V8 Jominy gate: {'PASS' if r['passed'] else 'FAIL'}")
     print(f"  in 8620H band: {r['in_band']} (min margin {r['min_band_margin_hrc']:.1f} HRC)")
-    print(f"  max |err| vs mid-band = {r['max_err_hrc']:.1f} HRC, "
-          f"MAE = {r['mae_hrc']:.1f} HRC")
+    print(f"  max |err| vs mid-band = {r['max_err_hrc']:.1f} HRC, MAE = {r['mae_hrc']:.1f} HRC")
     print("  J(mm)   ref    pred   err")
     for pos, ref, pred, err in zip(r["positions_mm"], r["ref_hrc"], r["pred_hrc"], r["err_hrc"]):
         print(f"  {pos:5.1f}  {ref:5.1f}  {pred:5.1f}  {err:+5.1f}")
-    print(f"  quench-end H = {r['H'][0]:.0f} HV ({r['HRC'][0]:.1f} HRC), "
-          f"far-end H = {r['H'][-1]:.0f} HV ({r['HRC'][-1]:.1f} HRC)")
+    print(
+        f"  quench-end H = {r['H'][0]:.0f} HV ({r['HRC'][0]:.1f} HRC), "
+        f"far-end H = {r['H'][-1]:.0f} HV ({r['HRC'][-1]:.1f} HRC)"
+    )
 
 
 if __name__ == "__main__":

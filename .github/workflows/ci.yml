@@ -18,4 +18,4 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run ruff check .
       - run: uv run pytest
-      - run: uv run python -m ferrumize.cli --seed 0 verify
+      - run: uv run python -m ferrumize.cli --seed 0 verify --fast

@@ -72,11 +72,22 @@ A fourth property was learned the hard way: **chains must be long enough for
 the intervals themselves to be trustworthy.** At N_DRAWS=60, measured
 coverage came out 0.84 (outside the band) — not because the sampler was
 biased, but because 5/95 percentile estimates from 60 draws carry large
-Monte Carlo error, which mechanically deflates coverage. N_WARMUP=200 gives
-mass-matrix adaptation room and N_DRAWS=200 stabilizes the percentile
-estimates. (`max_tree_depth` is kept at 6 — deeper trees let pathological
-prior draws explore exponentially large trees and turn the gate from ~15
-minutes into 2.5+ hours without adding SBC validity.)
+Monte Carlo error, which mechanically deflates coverage. N_WARMUP=300 and
+N_DRAWS=200 give mass-matrix adaptation room and stable percentile
+estimates. (Earlier revisions kept `max_tree_depth` at 6 to bound wall time;
+the final config uses `max_tree_depth=8` with `target_accept_prob=0.9` —
+the rank-uniformity criterion was failing under the tighter final physics
+tree at depth 6, and a multi-chain diagnostic (R̂ ≤ 1.12, inter-chain
+agreement ≤ 0.03 in log D0) confirmed the deeper tree fixes the sampler
+rather than masking a bias.)
+
+Final full-suite result (200 simulations): rank-uniformity passes
+(χ² p = 0.074); measured 90% coverage is 0.83 against the 0.858–0.942
+band — a mild, directionally consistent under-coverage across repeated
+runs. The credible intervals are therefore slightly tight; the point
+estimates are independently validated by V8 (Jominy) and the traverse
+reconstruction. This residual is documented in the README as the known
+limitation of the shipped V7 gate rather than re-tuned away.
 
 V7 calibrates a reduced two-parameter subset {log D0, C_pot} on one schedule
 so the 200 simulations are tractable on CPU; the full five-parameter

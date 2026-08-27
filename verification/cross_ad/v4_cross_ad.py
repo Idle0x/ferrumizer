@@ -141,7 +141,9 @@ def run_v4_containers() -> dict:
     from ferrumize.config import load_config, scenario_from_config
     from ferrumize.pipeline import FerrumizerPipeline, ProcessParams
 
-    cfg = load_config(str(Path(__file__).resolve().parents[2] / "data" / "synthetic" / "calibration_data.yaml"))
+    cfg = load_config(
+        str(Path(__file__).resolve().parents[2] / "data" / "synthetic" / "calibration_data.yaml")
+    )
     sc = scenario_from_config(cfg)
     pipe = FerrumizerPipeline(scenario=sc)
     p = pipe.params
@@ -179,7 +181,9 @@ if __name__ == "__main__":
     if "--containers" in sys.argv:
         r = run_v4_containers()
         status = "PASS" if r["passed"] else "FAIL"
-        print(f"V4-containers [{status}]  g_ad={r['g_ad']:.4e} g_fd={r['g_fd']:.4e} rel={r['rel_err']:.3f}")
+        print(
+            f"V4-containers [{status}]  g_ad={r['g_ad']:.4e} g_fd={r['g_fd']:.4e} rel={r['rel_err']:.3f}"
+        )
     else:
         r = run_v4()
         status = "PASS" if r["passed"] else "FAIL"

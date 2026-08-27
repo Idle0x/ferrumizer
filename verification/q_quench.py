@@ -56,11 +56,9 @@ def run_q2() -> dict:
 def run_q3() -> dict:
     """Differentiability of the cooling curve."""
     t = jnp.linspace(0.0, 600.0, 50)
-    g = jax.grad(
-        lambda h: jnp.sum(
-            newton_cooling_curve(1223.0, 333.0, h, 5.46e6, 0.008, t, 0.5)
-        )
-    )(900.0)
+    g = jax.grad(lambda h: jnp.sum(newton_cooling_curve(1223.0, 333.0, h, 5.46e6, 0.008, t, 0.5)))(
+        900.0
+    )
     passed = bool(jnp.isfinite(g))
     return {"passed": passed, "grad_h": float(g)}
 

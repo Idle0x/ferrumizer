@@ -360,7 +360,9 @@ def fig_f1_hero(out: Path):
 
         C = jnp.asarray(C_hist[cidx])
         Ms = ms_andrews(C, preset["ms"]["A"], preset["ms"]["b_carbon"])
-        fM = km_fraction(Ms, scenario.T_quench, preset["km_alpha"], preset.get("mf_offset_K", 200.0))
+        fM = km_fraction(
+            Ms, scenario.T_quench, preset["km_alpha"], preset.get("mf_offset_K", 200.0)
+        )
         H = hardness_profile(C, preset, fM)
         ecd = ecd_from_hardness(H, jnp.asarray(x_mm), preset["ecd_threshold_hv"])
 
@@ -469,18 +471,34 @@ def fig_f6_posterior(out: Path):
     th = preset["thermal"]
     knots = jnp.array([[0.0, 1800.0], [950.0, 950.0]], dtype=jnp.float64)
     res = fast_forward(
-        jnp.log(jnp.float64(2.2e-5)), jnp.float64(137.0), jnp.float64(1.0),
-        jnp.float64(1e-4), jnp.float64(0.8),
-        schedule_knots=knots, t_total=1800.0, T_init_K=298.15,
-        T_quench=298.15, h_conv=20.0, k=th["k"],
-        rho_cp=th["rho"] * th["cp"], half_thickness_m=0.008,
-        x_half_mm=8.0, carbon_n=21, carbon_dt=2.0,
-        carbon_mode="dirichlet", preset=preset, n_T_samples=60,
+        jnp.log(jnp.float64(2.2e-5)),
+        jnp.float64(137.0),
+        jnp.float64(1.0),
+        jnp.float64(1e-4),
+        jnp.float64(0.8),
+        schedule_knots=knots,
+        t_total=1800.0,
+        T_init_K=298.15,
+        T_quench=298.15,
+        h_conv=20.0,
+        k=th["k"],
+        rho_cp=th["rho"] * th["cp"],
+        half_thickness_m=0.008,
+        x_half_mm=8.0,
+        carbon_n=21,
+        carbon_dt=2.0,
+        carbon_mode="dirichlet",
+        preset=preset,
+        n_T_samples=60,
     )
     scenario = Scenario(
-        alloy="8620", t_total=1800.0,
-        schedule_times=(0.0, 1800.0), schedule_temps_C=(950.0, 950.0),
-        thermal_n=21, carbon_n=21, carbon_dt=2.0,
+        alloy="8620",
+        t_total=1800.0,
+        schedule_times=(0.0, 1800.0),
+        schedule_temps_C=(950.0, 950.0),
+        thermal_n=21,
+        carbon_n=21,
+        carbon_dt=2.0,
     )
     rng = np.random.default_rng(0)
     obs_depths = np.asarray(res["x_mm"])[::4]
@@ -504,8 +522,13 @@ def fig_f6_posterior(out: Path):
             if i == j:
                 ax.hist(np.asarray(samples[name_i]), bins=24, color=GOLD, alpha=0.85)
             else:
-                ax.scatter(np.asarray(samples[name_j]), np.asarray(samples[name_i]),
-                           s=2, alpha=0.15, color=EMBER)
+                ax.scatter(
+                    np.asarray(samples[name_j]),
+                    np.asarray(samples[name_i]),
+                    s=2,
+                    alpha=0.15,
+                    color=EMBER,
+                )
             ax.tick_params(labelsize=6)
             if i == len(names) - 1:
                 ax.set_xlabel(name_j, fontsize=7)

@@ -30,8 +30,7 @@ class TestTimeNormalization:
     def test_10s_log_with_s_header_is_not_scaled(self):
         t = np.arange(0.0, 2 * 3600.0, 10.0)
         T = 950.0 + 3.0 * np.sin(t / 300.0)
-        text = _csv("time [s],temperature [C]",
-                    [f"{a:.0f},{b:.3f}" for a, b in zip(t, T)])
+        text = _csv("time [s],temperature [C]", [f"{a:.0f},{b:.3f}" for a, b in zip(t, T)])
         r = parse_plc_log("10s.csv", text=text)
         assert r.has_trajectory
         tr = r.trajectory
@@ -75,8 +74,9 @@ class TestTimeNormalization:
         assert any("hours" in w for w in r.warnings)
 
     def test_clock_hhmmss_parsed_to_elapsed_seconds(self):
-        clock = [f"{8 + i // 3600:02d}:{(i % 3600) // 60:02d}:{i % 60:02d}"
-                 for i in range(0, 7200, 30)]
+        clock = [
+            f"{8 + i // 3600:02d}:{(i % 3600) // 60:02d}:{i % 60:02d}" for i in range(0, 7200, 30)
+        ]
         T = 950.0 + np.sin(np.arange(len(clock)) / 10.0)
         text = _csv("timestamp,temp", [f"{a},{b:.3f}" for a, b in zip(clock, T)])
         r = parse_plc_log("clock.csv", text=text)
@@ -113,22 +113,19 @@ class TestRowsAndValidation:
     """P2 #12 rows_used exact; P2 #13 range validation warns."""
 
     def test_rows_used_traverse_only_is_exact(self):
-        text = _csv("depth_mm,hardness_hv",
-                    ["0.0,650", "0.5,620", "1.0,580", "1.5,540", "2.0,500"])
+        text = _csv("depth_mm,hardness_hv", ["0.0,650", "0.5,620", "1.0,580", "1.5,540", "2.0,500"])
         r = parse_plc_log("trav.csv", text=text)
         assert r.rows_total == 6
         assert r.rows_used == 5  # the five data rows, not rows_total - start
 
     def test_rows_used_with_malformed_rows(self):
-        text = _csv("time [s],temp",
-                    ["0,950", "10,951", "junk", "20,949", "30,952", "banner,row"])
+        text = _csv("time [s],temp", ["0,950", "10,951", "junk", "20,949", "30,952", "banner,row"])
         r = parse_plc_log("junk.csv", text=text)
         assert r.rows_used == 4
         assert any("malformed" in w for w in r.warnings)
 
     def test_negative_depth_and_bad_hardness_warn(self):
-        text = _csv("depth_mm,hardness_hv",
-                    ["-0.5,2500", "0.0,620", "1.0,40"])
+        text = _csv("depth_mm,hardness_hv", ["-0.5,2500", "0.0,620", "1.0,40"])
         r = parse_plc_log("bad.csv", text=text)
         assert any("Negative depths" in w for w in r.warnings)
         assert any("Hardness outside" in w for w in r.warnings)

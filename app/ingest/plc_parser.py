@@ -33,21 +33,61 @@ import numpy as np
 # Column synonym tables
 # --------------------------------------------------------------------------- #
 TIME_SYNONYMS = {
-    "time", "t", "time_s", "timestamp", "time_sec", "seconds", "sec", "elapsed",
-    "elapsed_s", "s", "time_since_start", "dt",
+    "time",
+    "t",
+    "time_s",
+    "timestamp",
+    "time_sec",
+    "seconds",
+    "sec",
+    "elapsed",
+    "elapsed_s",
+    "s",
+    "time_since_start",
+    "dt",
 }
 TEMP_SYNONYMS = {
-    "temp", "temperature", "temp_c", "temperature_c", "t_c", "tc", "temp_degc",
-    "temperature_degc", "degc", "temp_f", "temperature_f", "degf", "temp_degf",
-    "furnace_temp", "furnace_temperature", "zone_temp", "soak_temp", "atmos_temp",
+    "temp",
+    "temperature",
+    "temp_c",
+    "temperature_c",
+    "t_c",
+    "tc",
+    "temp_degc",
+    "temperature_degc",
+    "degc",
+    "temp_f",
+    "temperature_f",
+    "degf",
+    "temp_degf",
+    "furnace_temp",
+    "furnace_temperature",
+    "zone_temp",
+    "soak_temp",
+    "atmos_temp",
 }
 DEPTH_SYNONYMS = {
-    "depth", "depth_mm", "x", "x_mm", "dist", "distance", "distance_mm",
-    "case_depth", "depth_from_surface",
+    "depth",
+    "depth_mm",
+    "x",
+    "x_mm",
+    "dist",
+    "distance",
+    "distance_mm",
+    "case_depth",
+    "depth_from_surface",
 }
 HARDNESS_SYNONYMS = {
-    "hardness", "hardness_hv", "hv", "hv0.3", "hv0_3", "h", "h_hv",
-    "microhardness", "vickers", "vickers_hv",
+    "hardness",
+    "hardness_hv",
+    "hv",
+    "hv0.3",
+    "hv0_3",
+    "h",
+    "h_hv",
+    "microhardness",
+    "vickers",
+    "vickers_hv",
 }
 
 _UNIT_RE = re.compile(r"(?i)(deg\s*c|degc|celsius|°c|\bc\b)")
@@ -134,7 +174,7 @@ class IngestReport:
     rows_total: int = 0
     rows_used: int = 0
     trajectory: dict | None = None  # {"t_s": [...], "T_C": [...]}
-    traverse: dict | None = None    # {"depth_mm": [...], "hardness_HV": [...]}
+    traverse: dict | None = None  # {"depth_mm": [...], "hardness_HV": [...]}
     temperature_unit: str = "C"
     warnings: list[str] = field(default_factory=list)
 
@@ -251,7 +291,9 @@ def parse_plc_log(source: str | Path, text: str | None = None) -> IngestReport:
             report.temperature_unit = "F" if _FAHRENHEIT_RE.search(u) else "C"
     else:
         # headerless: assume the first two columns are time, temperature
-        report.warnings.append("No recognizable header row found; assumed columns = time,temperature")
+        report.warnings.append(
+            "No recognizable header row found; assumed columns = time,temperature"
+        )
         colmap = {"time": 0, "temp": 1}
 
     # Parse rows into role arrays
@@ -318,10 +360,14 @@ def parse_plc_log(source: str | Path, text: str | None = None) -> IngestReport:
                 unit, src = _detect_time_unit(raw_rows[header_idx][colmap["time"]])
             if unit == "min":
                 t = t * 60.0
-                report.warnings.append("Time column header says minutes; converted to seconds (×60).")
+                report.warnings.append(
+                    "Time column header says minutes; converted to seconds (×60)."
+                )
             elif unit == "h":
                 t = t * 3600.0
-                report.warnings.append("Time column header says hours; converted to seconds (×3600).")
+                report.warnings.append(
+                    "Time column header says hours; converted to seconds (×3600)."
+                )
             elif unit == "s":
                 pass  # already seconds
             else:
@@ -405,8 +451,13 @@ def _rdp_simplify(points: np.ndarray, epsilon: float) -> np.ndarray:
         if seg_len < 1e-12:
             return np.array([start, end])
         # perpendicular distance of each interior point from the chord
-        d = np.abs((end[0] - start[0]) * (start[1] - pts[:, 1])
-                   - (start[0] - pts[:, 0]) * (end[1] - start[1])) / seg_len
+        d = (
+            np.abs(
+                (end[0] - start[0]) * (start[1] - pts[:, 1])
+                - (start[0] - pts[:, 0]) * (end[1] - start[1])
+            )
+            / seg_len
+        )
         idx = int(np.argmax(d[1:-1])) + 1
         if d[idx] > epsilon:
             left = _simplify(pts[: idx + 1])
