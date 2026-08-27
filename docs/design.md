@@ -47,8 +47,8 @@ ferrumize design 0.15 --config my_furnace.yaml          # from a config
 - `--penalty energy` sweeps penalty weights and writes the **Pareto front**
   (figure F9): how much case depth must be given up to save gas. The energy
   proxy is a relative penalty axis (time-integral of setpoint above ambient),
-  not an absolute energy figure — see Honest limitations in the
-  [README](../README.md#honest-limitations).
+  not an absolute energy figure — see Limitations in the
+  [README](../README.md#limitations).
 - Unreachable targets produce an **INFEASIBLE** verdict with the reachable
   range and a hint (increase soak time, part size, or carbon potential).
 

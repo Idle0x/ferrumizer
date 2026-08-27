@@ -18,5 +18,5 @@ images reproduce for anyone who clones the repo.
 | F9 | `figures/F9_pareto.png` | ECD-vs-energy Pareto front from schedule design | `ferrumize figures --only F9` |
 | F10 | `figures/F10_alloy_strip.png` | Same recipe across 8620 / 9310 / 5120 | `ferrumize figures --only F10` |
 
-Full plain-language explanations of every figure live in the
-[README](../README.md#the-figures-what-each-one-proves).
+Full explanations of every figure live in the
+[README](../README.md#figures-and-validation).

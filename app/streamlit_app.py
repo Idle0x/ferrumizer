@@ -358,9 +358,16 @@ def render_profile_plots(result, carbon_potential):
 # --------------------------------------------------------------------------- #
 with st.sidebar:
     st.subheader("Process")
+    _ALLOY_DESCRIPTORS = {
+        "8620": "8620 — low-alloy steel (axles, gears)",
+        "9310": "9310 — Ni-Cr-Mo steel (heavy-duty gears, bearings)",
+        "5120": "5120 — low-carbon Cr steel (case-hardened parts)",
+        "Custom…": "Custom… (enter chemistry below)",
+    }
     alloy_choice = st.selectbox(
-        "Alloy",
-        ["8620", "9310", "5120", "Custom…"],
+        "Alloy (steel grade)",
+        list(_ALLOY_DESCRIPTORS),
+        format_func=lambda a: _ALLOY_DESCRIPTORS[a],
         help="Steel grade. The three shipped presets carry literature-anchored "
         "diffusion/hardness constants; 'Custom…' builds a preset from the "
         "chemistry you enter below using published correlations (estimates, "

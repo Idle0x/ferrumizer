@@ -70,4 +70,4 @@ boundary; a commercial-FE wrapper would be heavy and unverifiable. Keeping the
 legacy FD box first-class — and proving the composition gradients against it —
 is the honest middle: the boundary is real, the gradient claims are checked,
 and the whole thing reproduces on a laptop. See the README's
-[Why Tesseract](../README.md#why-tesseract-and-why-track-04) section.
+[Tesseract integration](../README.md#tesseract-integration) section.

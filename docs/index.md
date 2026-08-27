@@ -55,5 +55,5 @@ that produces the depth you need** — instead of guess, cut, measure, repeat.
 
 Every approximation (1-D geometry, synthetic literature reconstruction,
 order-of-magnitude C-curve constants, energy proxy) is documented in the
-[README limitations](../README.md#honest-limitations) and in the physics
+[README limitations](../README.md#limitations) and in the physics
 pages. Nothing here is presented as certified commercial FE/CFD results.

@@ -6,205 +6,242 @@
 [![Repo](https://img.shields.io/badge/github-Idle0x%2Fferrumizer-23262A)](https://github.com/Idle0x/ferrumizer)
 
 > **Gradients through the furnace.**
-> The differentiable heat-treatment engine — gas carburizing modeled end-to-end
-> as one differentiable pipeline: furnace schedule → thermal history → carbon
-> diffusion → phase transformation → hardness → effective case depth.
+> A differentiable heat-treatment engine for gas carburizing, from furnace
+> schedule to thermal history, carbon diffusion, phase transformation,
+> hardness, and effective case depth.
 
-Ferrumizer is a **Tesseract Hackathon 2026** submission.
-**Track 04 — Differentiable inference & UQ**, cross-track with **Track 02 —
-Multi-physics & coupled systems**. It composes three independently buildable
-Tesseracts across a real differentiation boundary, then uses end-to-end
-gradients to (a) **calibrate** process parameters against measured hardness
-traverses with full Bayesian uncertainty, and (b) **design** furnace schedules
-that hit a target effective case depth (ECD) with an energy trade-off.
+Ferrumizer is a **Tesseract Hackathon 2026** submission for
+**Track 04 — Differentiable Inference & UQ**, with a cross-track contribution
+to **Track 02 — Multi-Physics & Coupled Systems**.
 
-> ### 🔁 Reproducing everything
-> Every gate, figure, and dataset in this repo is built by a documented,
-> seeded command — no hidden state, no screenshots.
-> **→ [`docs/reproducing.md`](docs/reproducing.md)** is the single reference:
-> minimum/recommended requirements, the complete command list with run times
-> and memory costs, step-by-step regeneration of every artifact, the full app
-> feature list, and the pitfalls (what's slow, what eats RAM, when bytes must
-> match).
->
-> Short version: `uv sync --extra app --extra dev --extra docs` → `make data`
-> → `ferrumize verify --fast` (≈4 min) → `ferrumize figures` (≈30 min) →
-> `ferrumize app`. Python 3.12+, CPU-only, 8 GB RAM minimum / 16 GB
-> recommended.
+The pipeline composes three independently executable Tesseract components
+into a single differentiable workflow:
+
+```
+furnace schedule → thermal history → carbon profile → hardness → ECD
+```
+
+End-to-end differentiation enables two inverse workflows:
+
+1. **Calibration** — infer process parameters from measured hardness
+   traverses using Bayesian inference and quantify posterior uncertainty.
+2. **Inverse design** — optimize a furnace schedule for a target effective
+   case depth, optionally penalizing energy consumption.
+
+Ferrumizer is a **process emulator**, not a commercial finite-element or CFD
+package. It uses documented one-dimensional approximations and
+literature-anchored parameters for fast simulation, calibration,
+optimization, and methodological validation.
 
 ---
 
 ## Table of contents
 
-1. [What this project is](#what-this-project-is)
-2. [Why differentiable heat treatment](#why-differentiable-heat-treatment)
-3. [Architecture: three Tesseracts, one gradient](#architecture-three-tesseracts-one-gradient)
-4. [Why Tesseract, and why Track 04](#why-tesseract-and-why-track-04)
+1. [Overview](#overview)
+2. [Motivation](#motivation)
+3. [Architecture](#architecture)
+4. [Tesseract integration](#tesseract-integration)
 5. [Quickstart](#quickstart)
-6. [What you can do with it](#what-you-can-do-with-it)
-7. [The figures: what each one proves](#the-figures-what-each-one-proves)
-8. [Physics model reference](#physics-model-reference)
-9. [Verification](#verification)
-10. [Reproducing everything](docs/reproducing.md) — requirements, full command list with times/RAM, regeneration recipes
-11. [Extending Ferrumizer](#extending-ferrumizer)
-12. [Honest limitations](#honest-limitations)
-13. [Future work](#future-work)
-14. [Repository layout](#repository-layout)
-15. [Documentation](#documentation)
-16. [Citation & license](#citation--license)
+6. [Interfaces](#interfaces)
+7. [Capabilities](#capabilities)
+8. [Figures and validation](#figures-and-validation)
+9. [Glossary](#glossary)
+10. [Physics model](#physics-model)
+11. [Verification](#verification)
+12. [Reproducibility](#reproducibility)
+13. [Extending Ferrumizer](#extending-ferrumizer)
+14. [Limitations](#limitations)
+15. [Future work](#future-work)
+16. [Repository layout](#repository-layout)
+17. [Documentation](#documentation)
+18. [Citation and license](#citation-and-license)
 
 ---
 
-## What this project is
+## Overview
 
-Gas carburizing is how industry hardens the *surface* of low-carbon steel
-parts (gears, shafts, bearings) without hardening the core: the part is held
-in a carbon-rich furnace atmosphere at ~900–1050 °C, carbon diffuses into the
-surface, and a quench transforms the carbon-enriched austenite into hard
-martensite. The engineering quantity that matters is the **effective case
-depth (ECD)** — the depth at which hardness crosses 550 HV (ISO 2639) — because
-it is the specification the customer pays for.
+Gas carburizing is a heat-treatment process used to harden the surface of
+low-carbon steel components such as gears, shafts, and bearings while
+retaining a tougher core. The part is held in a carbon-rich atmosphere,
+typically at approximately 900–1050 °C, allowing carbon to diffuse into the
+surface. A subsequent quench transforms the carbon-enriched austenite into
+hard martensite.
 
-Ferrumizer treats that whole chain as **one differentiable function**:
+The primary engineering output is **effective case depth (ECD)**: the depth
+at which hardness falls below 550 HV, following ISO 2639.
+
+Ferrumizer models this process as a single differentiable pipeline:
 
 ```
 furnace schedule → T(x,t) → C(x,t) → H(x) → ECD
 ```
 
-Every stage is differentiable in its parameters (emissivity, diffusivity
-prefactor D₀, activation energy Q, carbon potential C_pot, mass-transfer
-coefficient h_m), so gradients flow from the final hardness curve *backward
-through all three stages*. That is what makes two things possible that trial
-and-error cannot do:
+The stages are differentiable with respect to process and model parameters
+including emissivity, diffusion prefactor `D₀`, activation energy `Q`,
+carbon potential `C_pot`, and mass-transfer coefficient `h_m`. Gradients can
+therefore propagate from the final hardness profile back through the
+complete process model.
 
-1. **Calibration**: given a measured hardness traverse, recover the furnace's
-   actual effective parameters — with an uncertainty estimate, not a point
-   guess.
-2. **Inverse design**: given a target ECD, solve for the schedule that produces
-   it, with an optional energy penalty for the gas bill.
+This supports two inverse problems:
 
-The project is deliberately honest about what it is: a **process emulator** —
-a fast, transparent model of the physics — not a commercial FE/CFD package,
-and not a claim that heat treatment can be reduced to a slider. Every
-approximation is documented in [docs/physics.md](docs/physics.md) and the
-[ADRs](docs/architecture.md).
+- **Calibration**: estimate effective furnace parameters from measured
+  hardness traverses, including Bayesian posterior uncertainty.
+- **Inverse design**: determine a furnace schedule that achieves a specified
+  ECD, with an optional energy penalty.
 
----
-
-## Why differentiable heat treatment
-
-The conventional workflow for developing a carburizing cycle is empirical:
-run a furnace, cut a part, measure a traverse, adjust, repeat. Each cycle
-costs a part, furnace time, and lab time. The problems with that loop:
-
-- **The schedule is a high-dimensional knob.** Soak temperature, soak time,
-  carbon potential, boost/diffuse split, quench severity — ECD depends on all
-  of them, nonlinearly and jointly. Trial-and-error searches one direction at
-  a time.
-- **Parameters are furnace-specific.** The textbook diffusion constants are
-  not your furnace's constants. Radiative emissivity, atmosphere behavior, and
-  mass-transfer conditions vary by furnace, load geometry, and age. A model
-  with fixed constants silently drifts from reality.
-- **Measurement is expensive.** A traverse is ~10 points of metallography.
-  Making the most of each measurement (Bayesian inference) beats averaging.
-
-Differentiability changes the loop: instead of "guess, measure, adjust",
-Ferrumizer solves **"what schedule produces this depth?"** as an optimization,
-and "what are my furnace's parameters, given the data I have?" as an inference
-problem — the two questions practitioners actually pay to answer.
-
-The carbon diffusion stage is deliberately dual:
-
-- a **legacy NumPy finite-difference box** whose parameter Jacobian is computed
-  by central finite differences (the way a 1990s solver would do it), and
-- a numerically **identical JAX twin** whose composition derivatives are exact
-  autodiff.
-
-This is not redundancy for its own sake: it is the *boundary*. The pipeline
-keeps the legacy box as a first-class citizen (forward computation is NumPy,
-Jacobian is FD) and uses the JAX twin only as a gradient reference. The
-composition of the two — gradients crossing a real implementation boundary —
-is exactly what Tesseract is for. See [V4/V4c](#verification).
+The model is intentionally transparent about its scope. Approximations and
+parameter provenance are documented in [docs/physics.md](docs/physics.md)
+and the architecture decision records in
+[docs/architecture.md](docs/architecture.md).
 
 ---
 
-## Architecture: three Tesseracts, one gradient
+## Motivation
+
+Conventional carburizing-cycle development is largely empirical: run a
+cycle, measure the resulting part, adjust the process, and repeat. Each
+iteration requires furnace time, material, and measurement.
+
+Several properties of the problem make this workflow difficult to optimize
+manually:
+
+- **Multiple coupled process variables.** Temperature, soak time, carbon
+  potential, boost/diffuse timing, and quench conditions jointly influence
+  ECD.
+- **Furnace-specific parameters.** Effective diffusion and heat-transfer
+  behavior varies with furnace, load geometry, atmosphere, and operating
+  condition.
+- **Limited measurements.** A hardness traverse provides only a small number
+  of observations from an expensive physical experiment.
+
+Differentiability turns the forward model into an inverse-modeling tool.
+Instead of repeatedly adjusting a schedule by trial and error, gradients can
+be used to optimize process parameters and schedules directly. Bayesian
+inference can likewise use the model to estimate uncertain process parameters
+from measured data.
+
+### Finite differences and automatic differentiation
+
+The carbon-diffusion stage intentionally supports two implementations:
+
+- a legacy NumPy finite-difference implementation, whose parameter Jacobian
+  is computed by central finite differences; and
+- a numerically equivalent JAX implementation, whose derivatives are obtained
+  through automatic differentiation.
+
+The NumPy implementation remains the forward computational path for the
+legacy component. The JAX implementation provides an independent derivative
+reference.
+
+This distinction creates a genuine finite-difference/autodiff implementation
+boundary within the composed pipeline. Verification gate V4 compares the two
+derivative paths, while V4c checks end-to-end gradients after containerized
+composition.
+
+---
+
+## Architecture
+
+Ferrumizer is composed of three independently buildable Tesseract components:
 
 ```
 ┌──────────────────────────┐      ┌──────────────────────────┐      ┌──────────────────────────┐
 │      thermal-stage       │      │     carburizing-stage    │      │     hardening-stage      │
-│   (JAX, explicit FTCS)   │      │  (legacy NumPy FD box +  │      │ (JAX: Andrews Ms, KM,    │
-│   conduction + Robin BC  │ ───► │   JAX twin, Scheil/JMAK) │ ───► │  JMAK, hardness mixing,  │
-│   T(x,t)                 │ T_s  │   C(x,t)                 │ C_f  │  ECD @ 550 HV            │
+│   JAX, explicit FTCS     │      │  NumPy FD + JAX twin     │      │   JAX phase/hardness     │
+│   conduction + Robin BC  │ ───► │  carbon diffusion       │ ───► │   transformation model   │
+│   T(x,t)                 │ T_s  │  C(x,t)                 │ C_f  │   H(x), ECD              │
 └──────────────────────────┘      └──────────────────────────┘      └──────────────────────────┘
         ▲                                    ▲                                    ▲
-        └───────────── end-to-end gradients (∂ECD/∂θ) ─────────────┘            │
+        └──────────────────── end-to-end gradients, ∂ECD/∂θ ─────────────────────┘
 ```
 
-Each stage lives in its own directory under
-[`components/`](components/) with a `tesseract_api.py` (the contract:
-InputSchema / OutputSchema / apply), a `tesseract_config.yaml` (container
-build), and test cases:
+Each component resides under [`components/`](components/) and provides:
 
-1. **`components/thermal-stage`** — 1-D conduction with convective + radiative
-   Robin boundary conditions (JAX, explicit FTCS, stability-enforced).
-2. **`components/carburizing-stage`** — carbon diffusion (Fick with Arrhenius
-   D(T)), Dirichlet or mass-transfer boundary, legacy NumPy FD forward with FD
-   parameter Jacobian + JAX twin.
-3. **`components/hardening-stage`** — Andrews (1965) martensite-start, KM
-   martensite fraction, Scheil-additivity JMAK for diffusional phases
-   (bainite/pearlite), smoothstep hardness mixing, ISO 2639 ECD.
+- `tesseract_api.py` — the InputSchema, OutputSchema, and `apply` contract;
+- `tesseract_config.yaml` — container configuration; and
+- component-specific tests.
 
-The composition happens in
-[`app/ferrumize/pipeline.py`](app/ferrumize/pipeline.py), with two execution
-paths:
+### 1. Thermal stage
 
-- `FerrumizerPipeline.forward()` — pure-JAX fast path (used by calibration,
-  design, figures, the app).
-- `FerrumizerPipeline.forward_containers()` — the **real container path**:
-  routes the same computation through the three Tesseract components via
-  `tesseract_jax.apply_tesseract`, so gradients provably cross **two container
-  boundaries**. This is what V4c verifies.
+[`components/thermal-stage`](components/thermal-stage) implements
+one-dimensional heat conduction using JAX and an explicit FTCS scheme with
+stability enforcement.
 
-The two paths agree to floating-point tolerance.
+The boundary conditions include convective and radiative heat transfer using
+Robin boundary conditions.
+
+### 2. Carburizing stage
+
+[`components/carburizing-stage`](components/carburizing-stage) models carbon
+diffusion using Fick's law with Arrhenius temperature dependence:
+
+```
+D(T) = D₀ · exp(−Q / RT)
+```
+
+The stage supports Dirichlet and mass-transfer boundary conditions.
+
+Its forward computation is implemented in NumPy, with parameter derivatives
+computed by central finite differences. A numerically equivalent JAX
+implementation provides an automatic-differentiation reference.
+
+### 3. Hardening stage
+
+[`components/hardening-stage`](components/hardening-stage) converts the
+carbon and thermal histories into phase fractions, hardness, and ECD using:
+
+- Andrews martensite-start temperature;
+- Koistinen–Marburger martensite kinetics;
+- Scheil-additivity JMAK for diffusional transformations;
+- smoothstep hardness mixing; and
+- ISO 2639 ECD.
+
+### Pipeline composition
+
+The stages are composed in
+[`app/ferrumize/pipeline.py`](app/ferrumize/pipeline.py).
+
+Two execution paths are available:
+
+- `FerrumizerPipeline.forward()` — the pure-JAX execution path used by
+  calibration, design, figures, and the application.
+- `FerrumizerPipeline.forward_containers()` — the containerized Tesseract
+  path, which routes the computation through the three components using
+  `tesseract_jax.apply_tesseract`.
+
+The two paths produce results that agree to floating-point tolerance. V4c
+verifies gradient propagation through the containerized composition.
 
 ---
 
-## Why Tesseract, and why Track 04
+## Tesseract integration
 
-The hackathon asks for three things, in order: composition across a real
-boundary, gradients doing real work, and a real problem where Tesseract is
-load-bearing.
+Tesseract provides the execution boundary between the independently developed
+physics components.
 
-**Why Tesseract for this project:**
+The three stages have different computational characteristics:
 
-- The three stages have genuinely different compute characters: a legacy
-  NumPy FD box (deliberately not autodiffed), a JAX tensor pipeline, and a
-  small phase-transformation kernel. Tesseract's contract-first isolation
-  keeps them independently buildable and testable, and lets the composition
-  cross the FD↔AD boundary *without hiding the implementation trade-off*.
-- Dependency isolation: the carburizing box runs in its own container with its
-  own environment; calibration/design never import its internals, only its
-  schema.
-- The verification suite and the container path share the same schemas, so
-  local dev and containerized execution stay in lockstep.
+- the thermal stage is JAX-native;
+- the carburizing stage preserves a legacy NumPy finite-difference
+  implementation alongside its JAX reference; and
+- the hardening stage is JAX-native.
 
-**Why Track 04 (Differentiable inference & UQ):** the rubric explicitly names
-this track as "an expensive or black-box solver wrapped as a Tesseract and
-dropped into a probabilistic workflow for Bayesian calibration... the solver
-may expose its Jacobian by autodiff or by finite differences; the composition
-with the inference engine is the contribution." That is precisely the
-architecture here: NumPyro NUTS over a Tesseract-wrapped solver that exposes
-its Jacobian both ways. Cross-track 02 because the pipeline is inherently
-multi-physics (thermal → carbon → hardening) and the inverse problem spans
-all three stages.
+This separation provides three benefits.
 
-**Why not another approach:** a monolithic JAX reimplementation of all three
-stages would be simpler to write but would *remove the boundary* — the thing
-the competition rewards. A commercial-FE wrapper (e.g. PyMAPDL/ANSYS, which
-won 2025) would be impressive but closed, heavy, and unverifiable in a
-hackathon window. The chosen design keeps the legacy box honest, the gradients
-provable, and the whole thing reproducible on a laptop.
+**Independent execution.** Each stage has its own schema, environment, tests,
+and container configuration.
+
+**Implementation isolation.** The calibration and design workflows depend on
+the component contract rather than importing implementation details from the
+carburizing solver.
+
+**Differentiable composition.** The complete pipeline can be differentiated
+across the component boundaries. V4 verifies agreement between the FD and
+autodiff derivative paths; V4c verifies finite, non-zero end-to-end gradients
+through the containerized composition.
+
+The Tesseract architecture is therefore part of the computational design, not
+simply a packaging layer.
 
 ---
 
@@ -213,69 +250,110 @@ provable, and the whole thing reproducible on a laptop.
 ```bash
 git clone https://github.com/Idle0x/ferrumizer.git
 cd ferrumizer
-uv sync --extra app --extra dev --extra docs   # extras are exclusive — include them all
+
+uv sync --extra app --extra dev --extra docs
 make data
-ferrumize verify --fast   # all gates except the two long ones (~4 min) — CI uses this
-ferrumize verify          # full suite incl. V6 recovery + V7 200-sim SBC
-ferrumize figures         # regenerate all 10 figures into figures/
-ferrumize app             # launch the Virtual Furnace app
+
+ferrumize verify --fast
+ferrumize verify
+
+ferrumize figures
+ferrumize app
 ```
 
-`ferrumize verify` runs every gate in `verification/` and exits non-zero on
-any FAIL. Two gates are slow: **V6** two-schedule recovery (~20 min) and
-**V7**, the 200-simulation SBC/TARP posterior-calibration check (~4 h on CPU).
-`ferrumize verify --fast` skips exactly those two and runs the remaining 11
-gates (V1–V5, V8, V8b, Q1–Q3) in a few minutes — that is what CI executes, so
-a small runner gets a green/red signal quickly. No threshold is loosened and
-no gate is renamed: the full suite remains the research-grade check.
+The extras are exclusive, so include all three when setting up the full
+development environment.
 
-Latest full-suite status of the two skipped gates:
-- **V6 — PASS.** Strongly-identified parameters recovered to < 5e-3; `h_m`
-  weakly identifiable (documented, posterior is broad).
-- **V7 — partial.** The sampler is proven healthy (multi-chain R̂ ≤ 1.12,
-  chains agree to ≤ 0.03 in log D0) and the SBC rank-uniformity test passes
-  (χ² p = 0.074). Measured 90% coverage is 0.83 vs the 0.90 target, a mild,
-  directionally consistent under-coverage across runs — the credible
-  intervals are slightly tight. Point estimates are independently validated
-  by V8 (Jominy end-quench, MAE 2.6 HRC) and the traverse reconstruction, so
-  the *estimates* hold; only the error bars are marginally over-confident.
+### Verification
 
-Requirements: Python 3.12+, `uv` (or pip with the same extras), JAX on CPU is
-sufficient.
+`ferrumize verify --fast` runs all verification gates except the two long
+gates, V6 and V7.
 
-## Ways to run it (three surfaces, one engine)
+```bash
+ferrumize verify --fast
+```
 
-Everything below runs the **same physics engine** — the CLI, the app, and the
-Python API are different front ends to the identical pipeline, so a schedule
-designed in one reproduces exactly in the others.
+This runs V1–V5, V8, V8b, and Q1–Q3 in a few minutes and is the configuration
+used by CI.
 
-**1. Terminal (CLI)** — scriptable, headless, the reproducibility surface:
+The full suite is:
+
+```bash
+ferrumize verify
+```
+
+The two long-running gates are:
+
+- V6: two-schedule parameter recovery, approximately 20 minutes.
+- V7: 200-simulation SBC/TARP posterior-calibration check, approximately
+  four hours on CPU.
+
+No thresholds or verification gates are removed by `--fast`; it only skips
+these two long-running checks.
+
+### Current long-gate status
+
+- **V6 — PASS.** Strongly identified parameters are recovered to `< 5e-3`.
+  `h_m` remains weakly identifiable, with a broad posterior.
+- **V7 — partial.** The sampler is healthy, with multi-chain R̂ ≤ 1.12 and
+  chain agreement ≤ 0.03 in `log D₀`. SBC rank uniformity passes
+  (`χ² p = 0.074`). Measured 90% coverage is 0.83 versus the 0.90 target,
+  indicating mild under-coverage and slightly overconfident credible
+  intervals. Point estimates are independently supported by V8
+  (Jominy end-quench, MAE 2.6 HRC) and traverse reconstruction.
+
+Requirements: Python 3.12+. CPU-only JAX is sufficient.
+
+---
+
+## Interfaces
+
+Ferrumizer exposes the same engine through three interfaces: CLI, browser
+application, and Python API.
+
+### CLI
+
+The CLI is the scriptable, headless interface:
 
 ```bash
 ferrumize validate CONFIG
+
 ferrumize simulate CONFIG --out results/simulate
+
 ferrumize calibrate DATA.yaml --chains 4 --draws 1000
+
 ferrumize design 0.15 --alloy 8620 --penalty energy
+
 ferrumize ingest /path/to/plc.log --out results/ingested
-ferrumize verify            # full gate table
-ferrumize verify --fast     # same, minus the two long gates (V6, V7) — CI
-ferrumize figures           # canonical case (byte-identical to the README)
-ferrumize figures --config my_case.yaml --seed 1   # F1/F6/F10 for YOUR case
+
+ferrumize verify
+ferrumize verify --fast
+
+ferrumize figures
+
+ferrumize figures --config my_case.yaml --seed 1
 ```
 
-**2. Browser (Streamlit app)** — interactive "what-if" surface:
+### Streamlit application
+
+Launch the interactive application with:
 
 ```bash
-ferrumize app          # opens http://localhost:8501
+ferrumize app
 ```
 
-Three tabs: **Virtual Furnace** (schedule/quench/alloy sliders → live
-T/C/H/ECD), **Cycle Predictor** (upload a traverse or raw PLC log → NUTS
-posterior), **Log Ingestion** (preview what the parser extracts from a messy
-furnace export).
+The application provides three interfaces:
 
-**3. Python API** — embed Ferrumizer in your own tooling (a Jupyter notebook,
-a CI check, another app, a scheduling service):
+- **Virtual Furnace** — interactively adjust schedule, quench conditions,
+  alloy, and geometry while viewing temperature, carbon, hardness, and ECD.
+- **Cycle Predictor** — upload a hardness traverse or raw PLC log for Bayesian
+  calibration.
+- **Log Ingestion** — inspect the fields extracted and normalized from furnace
+  log files.
+
+The application uses the same physics engine as the CLI and Python API.
+
+### Python API
 
 ```python
 from ferrumize.pipeline import FerrumizerPipeline, Scenario, ProcessParams
@@ -284,356 +362,567 @@ res = FerrumizerPipeline(
     Scenario(quench_medium="oil", quench_temp_K=333.15, size_mm=16.0),
     ProcessParams(C_pot=1.0),
 ).forward()
-print(res["ecd_mm"])  # 0.2134 (or your number)
+
+print(res["ecd_mm"])
 ```
 
-For the containerized Tesseract composition (the hackathon path), use
-`FerrumizerPipeline(...).forward_containers()` — it routes the same
-computation through the three real components via `tesseract_jax`, and V4c
-verifies gradients cross those container boundaries.
+For containerized Tesseract composition:
 
-**Reproducing results:** every figure, verification gate, and dataset is
-regenerated by a documented command (`ferrumize figures`, `ferrumize verify`,
-`make data`) — all seeded, so outputs are byte-stable on the same dependency
-versions. The README's [figures section](#the-figures-what-each-one-proves)
-gives the per-figure regeneration command.
+```python
+FerrumizerPipeline(...).forward_containers()
+```
+
+The containerized path executes the same pipeline through the three Tesseract
+components.
 
 ---
 
-## What you can do with it
+## Capabilities
 
-| Command | What it does |
+| Command | Description |
 |---|---|
-| `ferrumize simulate CONFIG` | Run the forward pipeline for a scenario and write T/C/H/ECD results. |
-| `ferrumize calibrate DATA.yaml --chains 4 --draws 1000` | NUTS Bayesian calibration against a measured traverse; gates on R̂ < 1.01 and bulk ESS > 400. |
-| `ferrumize design TARGET_ECD_MM --alloy 8620` | Inverse-design a schedule hitting a target ECD; add `--penalty energy` for the Pareto front. |
-| `ferrumize identifiability CONFIG` | Fisher/correlation analysis: why one schedule leaves D₀–Q tangled and two don't. |
-| `ferrumize ingest PLC_LOG` | Parse a messy furnace PLC/datalogger export into normalized trajectory + traverse. |
-| `ferrumize verify` | Run the V1–V9 + quench gate table. |
-| `ferrumize verify --fast` | Same, but skip the two slow gates (V6 recovery, V7 200-sim SBC) so CI finishes in minutes. What CI runs. |
-| `ferrumize figures` | Regenerate all 10 figures deterministically (seed 0, canonical 8620 case — byte-identical to the README). |
-| `ferrumize figures --config C.yaml [--seed N]` | Render the process-showcase figures F1/F6/F10 for *your* alloy/schedule (same YAML as `simulate`/`calibrate`). The 7 validation/method figures are fixed by design. |
-| `ferrumize app` | Launch the Streamlit Virtual Furnace. |
-
-The app (`ferrumize app`) is the interactive surface: drag schedule, quench,
-and (optionally) custom alloy chemistry; watch temperature, carbon, hardness,
-and the Case-Depth Dial update live; upload a traverse **or a raw PLC log**
-to run calibration; and inspect what the PLC ingestion parser extracts. It is
-a *predictor/emulator*, not a toy — every curve is the same physics the CLI
-solves.
+| `ferrumize simulate CONFIG` | Run the forward pipeline for a scenario and write temperature, carbon, hardness, and ECD results. |
+| `ferrumize calibrate DATA.yaml --chains 4 --draws 1000` | Perform NUTS Bayesian calibration against a measured traverse, with convergence gates on R̂ and effective sample size. |
+| `ferrumize design TARGET_ECD_MM --alloy 8620` | Optimize a furnace schedule for a target ECD. |
+| `ferrumize identifiability CONFIG` | Analyze parameter identifiability using Fisher information and correlation structure. |
+| `ferrumize ingest PLC_LOG` | Parse a furnace PLC/datalogger export into normalized trajectory and traverse data. |
+| `ferrumize verify` | Run the complete verification suite. |
+| `ferrumize verify --fast` | Run the verification suite while skipping the two long-running gates, V6 and V7. |
+| `ferrumize figures` | Regenerate all ten deterministic figures for the canonical 8620 case. |
+| `ferrumize figures --config C.yaml [--seed N]` | Generate configurable process figures for a user-defined alloy and schedule. |
+| `ferrumize app` | Launch the Streamlit Virtual Furnace application. |
 
 ### PLC log ingestion
 
-Real furnace logs arrive as company banners, mixed units, quoted cells, junk
-rows, and random delimiters. `ferrumize ingest` (and the app's Log Ingestion
-tab) sniffs the structure: auto-detected delimiter and header row, column-role
-mapping (time/temperature/depth/hardness via synonym table), deg C ↔ deg F
-conversion, time-unit normalization, malformed-row skipping with warnings, and
-compression of a noisy trajectory into piecewise-constant soak segments ready
-for a `Scenario`. Implementation:
-[`app/ingest/plc_parser.py`](app/ingest/plc_parser.py).
+Industrial furnace logs may contain mixed units, quoted cells, malformed
+rows, inconsistent delimiters, and non-data headers. `ferrumize ingest`
+normalizes these inputs by:
+
+- detecting delimiters and header rows;
+- mapping columns to time, temperature, depth, and hardness using a synonym
+  table;
+- converting °C and °F;
+- normalizing time units;
+- skipping malformed rows with warnings; and
+- compressing noisy trajectories into piecewise-constant soak segments
+  suitable for a `Scenario`.
+
+Implementation: [`app/ingest/plc_parser.py`](app/ingest/plc_parser.py).
 
 ### Dynamic alloy chemistry
 
-The three shipped presets (8620, 9310, 5120) are literature-anchored YAML in
+Ferrumizer ships three literature-anchored alloy presets:
+
+- 8620
+- 9310
+- 5120
+
+The presets are stored under
 [`components/shared/ferrumizer_physics/alloys/`](components/shared/ferrumizer_physics/alloys/).
-You are not limited to them: `composition_to_preset()` builds a full physics
-preset from bare composition (wt-%) using published correlations — Andrews'
-multi-element Ms line, case-hardness plateau anchored at ~0.9% C with a
-hardenability bump, gamma-iron diffusion defaults — and the pipeline accepts
-it directly (`FerrumizerPipeline(scenario, params, preset=preset)`). The app's
-**Custom…** alloy option uses exactly this path. Estimation rules are
-documented as estimates, not certified constants:
+
+Additional alloys can be generated from their composition using
+`composition_to_preset()`. The generated preset uses published correlations
+for:
+
+- the multi-element Andrews martensite-start relationship;
+- case-hardness behavior near approximately 0.9% C;
+- hardenability;
+- gamma-iron diffusion parameters.
+
+The resulting preset can be passed directly to
+`FerrumizerPipeline(..., preset=preset)`.
+
+These composition-derived parameters are estimates rather than certified
+material constants. The estimation rules are documented in
 [`components/shared/ferrumizer_physics/alloys.py`](components/shared/ferrumizer_physics/alloys.py).
 
-### Finite-rate quench model
+### Finite-rate quenching
 
-The default forward path previously assumed an **instantaneous** quench to
-298 K (a common modeling shortcut). Ferrumizer now ships a finite-rate quench
-model: a lumped-Newton cooling curve whose rate depends on quench medium
-(oil/water/polymer/air), bath temperature, agitation, and part size, with
-Scheil-additivity JMAK integration over the cooling curve for pearlite and
-bainite. The consequence is real and visible: a slow quench converts austenite
-to diffusional phases, surface hardness collapses, and ECD drops to zero —
-the actual production failure mode that an instant-quench model can never
-predict. Comparison: air quench → 100% pearlite / 0 HV case; water quench →
-~96% martensite / full case. See
-[`components/shared/ferrumizer_physics/hardening.py`](components/shared/ferrumizer_physics/hardening.py)
-and the figures below.
+The forward model includes a finite-rate quench model rather than assuming an
+instantaneous transition to 298 K.
+
+The model uses a lumped-Newton cooling curve whose rate depends on:
+
+- quench medium;
+- bath temperature;
+- agitation; and
+- characteristic part size.
+
+Pearlite and bainite formation are integrated along the cooling curve using
+Scheil-additivity JMAK, while Koistinen–Marburger kinetics determine the
+martensite fraction in the surviving austenite.
+
+The model can therefore represent the qualitative effect of insufficient
+quench severity: a slow quench promotes diffusional transformation, reducing
+surface hardness and potentially reducing ECD to zero.
+
+The current comparison produces approximately:
+
+- air quench → 100% pearlite / 0 HV case;
+- water quench → approximately 96% martensite / full case.
+
+The implementation is documented in
+[`components/shared/ferrumizer_physics/hardening.py`](components/shared/ferrumizer_physics/hardening.py).
 
 ---
 
-## The figures: what each one proves
+## Figures and validation
 
-All figures are generated deterministically by
-[`app/ferrumize/figures.py`](app/ferrumize/figures.py) — the RNG seed is fixed,
-so anyone can reproduce them bit-for-bit with `ferrumize figures` (or
-`ferrumize figures --only F3,F8` for a subset). They are *not* screenshots of
-the app: they are the same physics, rendered as publication artifacts.
+All ten figures are generated by
+[`app/ferrumize/figures.py`](app/ferrumize/figures.py).
 
-**Which figures are "yours" to configure, and which aren't.** The ten figures
-are two different animals:
+The random seed is fixed, allowing the canonical figures to be reproduced
+bit-for-bit under the same dependency versions:
 
-- **F3, F4, F5, F7** are *solver-validation* figures — convergence order,
-  FD-vs-autodiff agreement, error-vs-noise bounds. They test that the **code
-  is correct**, not that a specific part behaves a certain way. Threading your
-  schedule into a convergence-order plot would be meaningless, so they are
-  fixed by design.
-- **F2, F8, F9** are *method* figures (architecture, two-schedule
-  identifiability, ECD-vs-energy Pareto front). They demonstrate a specific
-  protocol, likewise fixed.
-- **F1 (hero loop), F6 (posterior), F10 (profiles)** are *process* figures —
-  the engine applied to a case. **These three accept your own parameters:**
+```bash
+ferrumize figures
+```
 
-  ```bash
-  # the shipped case (canonical 8620, seed 0 — byte-identical to these pages)
-  ferrumize figures --only F1,F6,F10
+Individual figures can be generated with:
 
-  # YOUR case: same YAML you already give to `simulate` / `calibrate`
-  ferrumize figures --only F1,F6,F10 --config my_case.yaml --seed 1
-  ```
+```bash
+ferrumize figures --only F3,F8
+```
 
-  A config like `my_case.yaml`:
+The figures fall into three categories.
 
-  ```yaml
-  alloy: 9310
-  geometry: slab
-  size_mm: 25.0
-  t_total: 3600
-  schedule:
-    times:   [0.0, 1200.0, 3600.0]
-    temps_C: [980.0, 980.0, 940.0]
-  params:
-    C_pot: 0.9
-  ```
+**Solver validation.** F3, F4, F5, and F7 validate numerical methods and
+derivative behavior. Their configurations are fixed so that they test
+specific numerical properties rather than arbitrary process cases.
 
-  One YAML then drives `validate` → `simulate` → `calibrate` → `figures`
-  (the exact same config machinery the other commands use).
+**Method demonstrations.** F2, F8, and F9 demonstrate architecture,
+identifiability, and schedule optimization using defined protocols.
 
-The most flexible surface is still the app — drag schedule, quench, alloy and
-size interactively. The CLI and this figures flag are the headless equivalent
-for your own numbers.
+**Process figures.** F1, F6, and F10 apply the engine to a process case and
+accept user-defined parameters.
 
-### F1 — The hero loop: one heat treatment, animated
+```bash
+ferrumize figures --only F1,F6,F10 --config my_case.yaml --seed 1
+```
+
+A single configuration can be used across validation, simulation,
+calibration, and figure generation:
+
+```yaml
+alloy: 9310
+geometry: slab
+size_mm: 25.0
+t_total: 3600
+
+schedule:
+  times:   [0.0, 1200.0, 3600.0]
+  temps_C: [980.0, 980.0, 940.0]
+
+params:
+  C_pot: 0.9
+```
+
+### F1 — Process overview
 
 ![F1](figures/F1_hero_loop.gif)
 
-What it shows: a single carburizing cycle, animated. Furnace schedule → part
-temperature → carbon soaking into the surface → hardness profile → ECD number
-counting up. This is the ten-second answer to "what does this tool do?"
+Animated representation of a carburizing cycle: furnace schedule, part
+temperature, carbon diffusion, hardness profile, and ECD.
 
-How to regenerate: `ferrumize figures --only F1` — or your own schedule via
-`--config my_case.yaml` (see [above](#the-figures-what-each-one-proves)).
+Regenerate with:
+
+```bash
+ferrumize figures --only F1
+```
 
 ### F2 — Architecture
 
 ![F2](figures/F2_architecture.png)
 
-What it shows: the three Tesseract stages and the end-to-end gradient flow
-through the composition.
+The three Tesseract stages and the end-to-end gradient path.
 
-How to regenerate: `ferrumize figures --only F2`.
+Regenerate with:
 
-### F3 — Analytic validation: erfc overlay
+```bash
+ferrumize figures --only F2
+```
+
+### F3 — Analytical diffusion validation
 
 ![F3](figures/F3_erfc_overlay.png)
 
-What it shows: for a semi-infinite slab with constant surface carbon, carbon
-diffusion has an exact analytic solution (the error function). This overlays
-the solver's numerical C(x) against the analytic curve; the two lines coincide
-(normalized L2 ≈ 2e-4, printed in the title). Meaning: the diffusion math is
-not hand-waving — it matches the textbook truth.
+Comparison of the numerical carbon-diffusion solution with the analytical
+semi-infinite-slab erfc solution under constant surface concentration.
 
-How to regenerate: `ferrumize figures --only F3`.
+The normalized L2 error is approximately `2e-4`.
 
-### F4 — Convergence: method of manufactured solutions
+Regenerate with:
+
+```bash
+ferrumize figures --only F3
+```
+
+### F4 — Convergence
 
 ![F4](figures/F4_mms_convergence.png)
 
-What it shows: a solution we know exactly is planted, then the solver is run
-at successively finer grids. Error vs grid spacing on a log-log scale falls
-at the predicted order (≥1.85). Meaning: the numerical discretization
-converges the way numerical analysis says it must.
+Method-of-manufactured-solutions convergence test. The numerical error
+decreases at the expected rate as the grid is refined, with observed order
+≥ 1.85.
 
-How to regenerate: `ferrumize figures --only F4`.
+Regenerate with:
 
-### F5 — The boundary proof: FD vs autodiff
+```bash
+ferrumize figures --only F4
+```
+
+### F5 — FD/autodiff agreement
 
 ![F5](figures/F5_cross_ad.png)
 
-What it shows: the same gradients computed two ways — finite differences
-through the legacy NumPy box, autodiff through the JAX twin. The bars agree to
-~10 decimal places (relative ∞-norm ≈ 6e-10 in the title). Meaning: crossing
-the implementation boundary loses nothing.
+Comparison of gradients obtained from the legacy finite-difference
+implementation and the JAX automatic-differentiation implementation.
 
-How to regenerate: `ferrumize figures --only F5`.
+The relative infinity norm is approximately `6e-10`, well below the `1e-3`
+verification threshold.
+
+Regenerate with:
+
+```bash
+ferrumize figures --only F5
+```
 
 ### F6 — Calibration posterior
 
 ![F6](figures/F6_posterior.png)
 
-What it shows: after NUTS calibration against a synthetic traverse, the
-posterior distributions over {log D₀, Q, C_pot, h_m, ε}. Tight peaks mean the
-data pins the parameter; wide/flat marginals mean it does not (see F8). The
-convergence gates (R̂, ESS) are enforced separately by the CLI.
+Posterior distributions from NUTS calibration against a synthetic hardness
+traverse for `{log D₀, Q, C_pot, h_m, ε}`.
 
-How to regenerate: `ferrumize figures --only F6` (needs a calibration run —
-see `docs/calibration.md`). To calibrate *your* case instead of the canonical
-8620 one, add `--config my_case.yaml` (the synthetic traverse is derived from
-the same scenario, so the posterior is for your alloy/schedule).
+Narrow posterior distributions indicate stronger parameter identification;
+broad distributions indicate parameters that remain weakly constrained.
 
-### F7 — Robustness: recovery vs measurement noise
+Regenerate with:
+
+```bash
+ferrumize figures --only F6
+```
+
+For a user-defined case:
+
+```bash
+ferrumize figures --only F6 --config my_case.yaml
+```
+
+See [docs/calibration.md](docs/calibration.md) for the calibration workflow.
+
+### F7 — Measurement-noise robustness
 
 ![F7](figures/F7_noise_sweep.png)
 
-What it shows: the parameter-recovery error as measurement noise increases
-from 0 to 20 HV. The gentle upward trend means the method degrades gracefully
-with realistic, noisy traverses rather than breaking.
+Parameter-recovery error as measurement noise increases from 0 to 20 HV. The
+experiment evaluates how calibration degrades as traverse measurements become
+less precise.
 
-How to regenerate: `ferrumize figures --only F7`.
+Regenerate with:
 
-### F8 — Identifiability: why two schedules beat one
+```bash
+ferrumize figures --only F7
+```
+
+### F8 — Parameter identifiability
 
 ![F8](figures/F8_identifiability.png)
 
-What it shows: with a single temperature schedule, D₀ and Q are statistically
-tangled (collinear); with two different schedules, the correlation structure
-collapses and the parameters become identifiable. This is the figure that tells
-a practitioner **how to use the tool correctly**: run two furnace cycles, not
-one.
+Comparison of parameter correlation under one and two temperature schedules.
+A single schedule leaves `D₀` and `Q` strongly correlated; using two distinct
+schedules reduces this correlation and improves identifiability.
 
-How to regenerate: `ferrumize figures --only F8`.
+Regenerate with:
 
-### F9 — Design: the ECD-vs-energy Pareto front
+```bash
+ferrumize figures --only F8
+```
+
+### F9 — ECD/energy Pareto front
 
 ![F9](figures/F9_pareto.png)
 
-What it shows: every point is the best schedule found under a given energy
-penalty. X = energy proxy (time-integral of setpoint above ambient), Y =
-achieved ECD. Meaning: how much case depth must be given up to save gas — the
-trade-off a process engineer takes to a meeting.
+Schedules optimized under different energy penalties. The resulting Pareto
+front shows the trade-off between achieved ECD and the model's relative
+energy proxy.
 
-How to regenerate: `ferrumize figures --only F9`.
+Regenerate with:
 
-### F10 — Alloy comparison strip
+```bash
+ferrumize figures --only F9
+```
+
+### F10 — Alloy comparison
 
 ![F10](figures/F10_alloy_strip.png)
 
-What it shows: the same recipe applied to the three shipped alloys, side by
-side, each labeled with its resulting ECD — the comparison view across 8620 /
-9310 / 5120.
+Comparison of the same process recipe applied to the three shipped alloy
+presets: 8620, 9310, and 5120.
 
-How to regenerate: `ferrumize figures --only F10` — or your own alloy/schedule
-via `--config my_case.yaml` (renders a single-alloy strip for that case).
+Regenerate with:
+
+```bash
+ferrumize figures --only F10
+```
+
+A user-defined configuration can be supplied with `--config`.
 
 ---
 
-## Physics model reference
+## Glossary
 
-Detailed derivations and constants live in [docs/physics.md](docs/physics.md)
-and the two ADRs ([ADR-001](docs/adr/ADR-001-carbon-diffusion-prefactor.md),
-[ADR-002](docs/adr/ADR-002-calibration-surrogate.md)). Summary:
+| Term | Definition |
+|---|---|
+| Carburizing | Heat treatment in which carbon diffuses into the surface of a low-carbon steel part, increasing its ability to harden during quenching. |
+| 8620 / 9310 / 5120 | AISI steel grades commonly used for carburized components. |
+| Hardness traverse | Hardness measurements taken at different depths below the treated surface. |
+| Effective case depth (ECD) | Depth at which hardness falls below the specified threshold of 550 HV under ISO 2639. |
+| Quench | Controlled cooling after carburizing that determines the phases formed in the carbon-enriched surface. |
+| Martensite / bainite / pearlite | Steel transformation products with different hardness and formation kinetics during cooling. |
+| Carbon potential (`C_pot`) | Effective surface carbon concentration imposed by the furnace atmosphere. |
+| `D₀`, `Q` | Arrhenius parameters governing the temperature dependence of carbon diffusion. |
+| Tesseract | A software component defined by a machine-readable I/O contract and `apply` interface, executable locally or in an isolated container. |
+| FD / AD | Finite differences approximate derivatives by perturbing inputs and rerunning the computation; automatic differentiation propagates derivatives through differentiable numerical operations. |
 
-| Stage | Model | Key assumptions |
+The complete glossary is available in
+[docs/design-rationale.md](docs/design-rationale.md).
+
+---
+
+## Physics model
+
+Detailed derivations, constants, and modeling decisions are documented in
+[docs/physics.md](docs/physics.md) and the architecture decision records
+[ADR-001](docs/adr/ADR-001-carbon-diffusion-prefactor.md) and
+[ADR-002](docs/adr/ADR-002-calibration-surrogate.md).
+
+| Stage | Model | Principal assumptions |
 |---|---|---|
-| Thermal | 1-D explicit FTCS conduction, convective + radiative Robin BC (JAX) | slab/axisymmetric radial; no CAD, stress, distortion |
-| Thermal surrogate (calibration) | Lumped capacitance with surface-T sampling (ADR-002) | validated V1 ≤ 0.5% |
-| Carbon | Fick with Arrhenius D(T) = D₀·exp(−Q/RT), Dirichlet or mass-transfer BC | 1-D; no grain-boundary/geometry effects |
-| Hardening | Andrews Ms, Koistinen–Marburger, Scheil-additivity JMAK, smoothstep hardness mixing, ISO 2639 ECD | carbon-proxy hardness + rule of mixtures; JMAK is a documented approximation |
-| Quench (new) | Lumped-Newton cooling curve (medium, bath T, agitation, part size) + Scheil-JMAK pearlite/bainite; KM on surviving austenite | single characteristic cooling curve per part; C-curve constants are order-of-magnitude, not certified TTT data |
+| Thermal | 1-D explicit FTCS conduction with convective and radiative Robin boundary conditions | Slab/axisymmetric radial geometry; no CAD, stress, or distortion. |
+| Thermal surrogate | Lumped-capacitance model with surface-temperature sampling | Used for calibration; validated to V1 ≤ 0.5%. |
+| Carbon | Fickian diffusion with Arrhenius `D(T)` and Dirichlet or mass-transfer boundary conditions | One-dimensional transport; no grain-boundary or detailed geometry effects. |
+| Hardening | Andrews `M_s`, Koistinen–Marburger, Scheil-additivity JMAK, smoothstep hardness mixing, ISO 2639 ECD | Carbon-proxy hardness model and documented phase-mixture approximation. |
+| Quench | Lumped-Newton cooling with medium, bath temperature, agitation, and part size; Scheil-JMAK for diffusional phases | One characteristic cooling curve per part; C-curve constants are representative rather than certified TTT data. |
 
-Every free parameter in the shipped presets carries provenance in the YAML
-comments or an ADR; nothing is fit-to-look-nice.
+Every free parameter in the shipped presets has documented provenance in the
+alloy YAML files or ADRs.
 
 ---
 
 ## Verification
 
-Run everything with `ferrumize verify` (each gate is an independent script
-under `verification/`).
+Run the complete suite with:
 
-| Gate | Check | Contract |
+```bash
+ferrumize verify
+```
+
+Each gate is implemented as an independent script under
+[`verification/`](verification/).
+
+| Gate | Check | Acceptance criterion |
 |---|---|---|
-| V1 | Lumped capacitance | max relative error < 0.5% |
-| V2 | Semi-infinite erfc | normalized L2 < 1e-3 |
-| V3 | MMS operators | order >= 1.85 |
-| V4 | FD box vs JAX twin | relative infinity norm < 1e-3 |
-| V4c | Container composition gradient (through 2 boundaries) | finite, non-zero, within 20% of FD |
-| V5 | Runtime gradient checks | zero failures on AD boxes |
-| V6 | Two-schedule recovery (mass-transfer BC) | strongly-identified params < 5e-3; h_m < factor 2 (documented weak identifiability) |
-| V7 | SBC/TARP | N_SIM ≥ 200, prior-based init; chi-squared p > 0.05; 90% coverage within binomial band |
-| V8 | Synthetic 8620 traverse reconstruction (literature-anchored params) | within stated reconstruction error bar |
-| Q1–Q3 | Quench model sanity | medium ranking (air > oil > water), collapse on slow quench, differentiability |
+| V1 | Lumped-capacitance model | Maximum relative error < 0.5% |
+| V2 | Semi-infinite erfc solution | Normalized L2 < 1e-3 |
+| V3 | Manufactured-solution operators | Order ≥ 1.85 |
+| V4 | FD box vs. JAX twin | Relative infinity norm < 1e-3 |
+| V4c | Containerized composition gradient | Finite, non-zero, within 20% of FD reference |
+| V5 | Runtime gradient checks | Zero failures on AD boxes |
+| V6 | Two-schedule parameter recovery | Strongly identified parameters < 5e-3; `h_m` < factor 2, subject to documented weak identifiability |
+| V7 | SBC/TARP | N_SIM ≥ 200; χ² p > 0.05; 90% coverage within binomial band |
+| V8 | Synthetic 8620 traverse reconstruction | Within stated reconstruction error |
+| Q1–Q3 | Quench-model sanity checks | Expected medium ranking, slow-quench collapse, and differentiability |
 
-Tests: `pytest tests/` (unit + regression, including the new quench, dynamic
-alloy, and PLC-ingestion tests). Lint: `ruff`. Types: `mypy` clean on 15
+Additional automated checks:
+
+```bash
+pytest tests/
+ruff
+mypy
+```
+
+The test suite includes unit and regression tests for the quench model,
+dynamic alloy chemistry, and PLC ingestion. `mypy` is clean on the current 15
 source files.
+
+---
+
+## Reproducibility
+
+Ferrumizer treats reproducibility as a first-class property of the project.
+
+The following artifacts are generated from documented commands:
+
+- verification results;
+- figures;
+- synthetic datasets; and
+- derived analysis outputs.
+
+The principal commands are:
+
+```bash
+make data
+
+ferrumize verify
+
+ferrumize figures
+```
+
+The canonical figures use a fixed random seed and are byte-stable under the
+same dependency versions.
+
+The complete reproduction guide is
+[docs/reproducing.md](docs/reproducing.md). It contains:
+
+- environment requirements;
+- the complete command list;
+- observed runtime and memory requirements;
+- step-by-step artifact regeneration;
+- application features;
+- byte-level reproducibility requirements; and
+- known performance and memory constraints.
+
+Typical resource usage is approximately:
+
+- Application: ~230 MB RAM.
+- Single CLI run: ~350 MB peak RAM.
+- Verification/regeneration: higher; individual measured requirements are
+  documented in `reproducing.md`.
+
+CPU-only execution is supported; a GPU is not required.
 
 ---
 
 ## Extending Ferrumizer
 
-Beyond the shipped commands, the pieces are designed to be reused:
+### Add an alloy
 
-- **New alloy**: drop a `aisi_XXXX.yaml` in
-  `components/shared/ferrumizer_physics/alloys/` following the 8620 schema, or
-  use `composition_to_preset()` for a bare chemistry at runtime (CLI/app).
-- **PLC/datalogger ingestion**: `app/ingest/plc_parser.py` returns normalized
-  trajectory + traverse; feed the traverse straight into `calibrate`.
-- **New stage**: implement a `tesseract_api.py` with the Input/Output schema,
-  add it to `FerrumizerPipeline.forward_containers`, and it composes.
-- **Different quench media**: the film coefficients live in
-  `QUENCH_MEDIA_H` in `hardening.py`; the C-curve constants in the alloy YAMLs.
-- **Other paths worth exploring** (not shipped): full 3-D geometry via a
-  mesher Tesseract (the 2025 winner's pattern); Enzyme-differentiated Fortran
-  legacy ports (the forum's HMC showcase pattern); PyTorch front-ends through
-  `tesseract-torch`; field-level HMC over the C(x) field instead of scalar
-  parameters.
+Add an `aisi_XXXX.yaml` file under:
+
+```
+components/shared/ferrumizer_physics/alloys/
+```
+
+following the existing 8620 schema.
+
+Alternatively, use `composition_to_preset()` to generate a physics preset
+from a composition at runtime.
+
+### Add a data source
+
+`app/ingest/plc_parser.py` produces normalized trajectory and traverse data
+that can be passed directly into calibration.
+
+### Add a Tesseract stage
+
+Implement:
+
+```
+tesseract_api.py
+```
+
+with the required input/output schemas and `apply` function, then add the
+component to `FerrumizerPipeline.forward_containers()`.
+
+### Add quench media
+
+Quench film coefficients are defined in `QUENCH_MEDIA_H` in `hardening.py`.
+C-curve constants are stored in the alloy YAML files.
+
+### Potential extensions
+
+The architecture also supports future work such as:
+
+- three-dimensional geometry through a meshing Tesseract;
+- Enzyme-differentiated legacy Fortran components;
+- PyTorch front ends through `tesseract-torch`;
+- field-level HMC over the carbon concentration field; and
+- expanded furnace telemetry integration.
 
 ---
 
-## Honest limitations
+## Limitations
 
-- **1-D geometry only.** No CAD, meshing, stress, distortion, or 3-D effects.
-  Part size enters as a characteristic length.
-- **The literature traverse is a synthetic reconstruction** anchored to
-  published parameter ranges — explicitly *not* a digitization of a specific
-  furnace dataset. The method is validated against synthetic ground truth;
-  the *industrial* claim would require a real measured traverse.
-- **JMAK/Scheil C-curve constants are order-of-magnitude**, representative of
-  low-alloy carburizing steels, not certified TTT data for a specific heat.
-  The quench model is qualitative-to-semiquantitative: it predicts failure
-  modes and rankings, not certified phase fractions.
-- **`h_m` (mass-transfer coefficient) is weakly identifiable from end-state
-  hardness.** Calibration uses the Robin (mass-transfer) boundary so `h_m` is
-  exercised, but after a multi-hour soak the surface concentration is pinned
-  near C_pot regardless of transfer rate; the posterior on `h_m` is broad
-  unless early-transient data is available (see V6 gate and calibration docs).
-- **Grossmann DI is a ranking estimate** (ASTM A255 practice), not a
-  certified Jominy curve; validate with an end-quench test for certification.
-- **The energy proxy is a relative penalty axis**, not an absolute energy
-  figure.
-- **Hardness is a carbon-proxy mixing rule**, not a microstructure-resolved
-  model.
-- **D₀/Q defaults** carry documented uncertainty (ADR-001); calibration
-  exists precisely because fixed constants drift from real furnaces.
+Ferrumizer's current scope is intentionally limited.
+
+### Geometry
+
+The thermal model is one-dimensional. It does not model CAD geometry,
+meshing, stress, distortion, or fully three-dimensional heat transfer. Part
+size is represented by a characteristic length.
+
+### Experimental data
+
+The literature-based traverse is a synthetic reconstruction anchored to
+published parameter ranges. It is not a digitization of a specific industrial
+furnace dataset.
+
+The current validation therefore establishes behavior against synthetic
+ground truth. Validation against measured industrial traverses remains future
+work.
+
+### Phase-transformation kinetics
+
+The JMAK/Scheil C-curve parameters are order-of-magnitude values
+representative of low-alloy carburizing steels rather than certified TTT data
+for a specific heat.
+
+The quench model is therefore qualitative to semi-quantitative. It is
+suitable for modeling trends and failure modes, but not for certification of
+phase fractions.
+
+### Mass-transfer identifiability
+
+`h_m` is weakly identifiable from end-state hardness alone.
+
+The calibration model uses a mass-transfer boundary condition so that `h_m`
+is represented explicitly. However, after a multi-hour soak, surface
+concentration approaches `C_pot` over a broad range of transfer rates. The
+posterior for `h_m` therefore remains broad unless early-transient data are
+available.
+
+### Hardenability
+
+Grossmann DI is a ranking estimate following ASTM A255 practice. It is not a
+certified Jominy curve and should be validated with an end-quench test when
+certification is required.
+
+### Energy objective
+
+The energy term used by inverse design is a relative penalty proxy based on
+the time integral of setpoint above ambient. It is not an absolute furnace
+energy measurement.
+
+### Hardness model
+
+Hardness is represented using a carbon-based mixing rule rather than a
+microstructure-resolved mechanical model.
+
+### Diffusion parameters
+
+Default `D₀` and `Q` values carry documented uncertainty. Calibration exists
+in part to account for the fact that effective furnace parameters may differ
+from nominal literature values.
 
 ---
 
 ## Future work
 
-Realistic, not hype:
-
-1. **Real furnace data**: calibrate against a genuinely measured traverse
-   (the single highest-value next step; the machinery is ready).
-2. **Grossmann quench-severity inversion** in the quench model.
-3. **3-D geometry** via a meshing Tesseract (CAD→mesh→FEM pattern).
-4. **Hall–Petch grain-size coupling** to hardness.
-5. **Uncertainty-aware design**: propagate the calibration posterior into the
-   design objective instead of point estimates.
-6. **Enzyme/Fortran legacy-port experiments** across a real language boundary.
-7. **Digital-twin integration layer** for furnace telemetry (PLC ingestion is
-   the first step).
+1. **Measured furnace data.** Calibrate against genuinely measured hardness
+   traverses and furnace histories.
+2. **Quench-severity inversion.** Infer effective Grossmann quench severity
+   from observed results.
+3. **Three-dimensional geometry.** Add CAD-to-mesh-to-solver workflows through
+   a dedicated Tesseract component.
+4. **Grain-size coupling.** Introduce Hall–Petch effects into the hardness
+   model.
+5. **Uncertainty-aware design.** Propagate the calibration posterior into the
+   schedule-design objective rather than optimizing against point estimates.
+6. **Legacy-language differentiation.** Evaluate Enzyme/Fortran components
+   across a real language boundary.
+7. **Digital-twin integration.** Extend the existing PLC ingestion layer into
+   a furnace telemetry integration interface.
 
 ---
 
@@ -641,51 +930,63 @@ Realistic, not hype:
 
 | Path | Purpose |
 |---|---|
-| [`components/`](components/) | The three Tesseracts (thermal / carburizing / hardening), each with API, config, requirements, test cases |
-| [`components/shared/ferrumizer_physics/`](components/shared/ferrumizer_physics/) | Physics library (thermal, carbon, hardening, alloys) + alloy presets |
-| [`app/ferrumize/`](app/ferrumize/) | CLI, pipeline composition, fast differentiable model, figures |
-| [`app/calibration/`](app/calibration/) | NumPyro NUTS calibration + convergence gates |
-| [`app/design/`](app/design/) | Gradient schedule design + Pareto front |
-| [`app/identifiability/`](app/identifiability/) | Fisher/correlation identifiability analysis |
-| [`app/ingest/`](app/ingest/) | PLC/datalogger ingestion parser |
-| [`app/streamlit_app.py`](app/streamlit_app.py) | The Virtual Furnace app |
-| [`verification/`](verification/) | V1–V9 + quench gate scripts |
-| [`tests/`](tests/) | Unit + regression tests |
-| [`data/`](data/) | Synthetic traverse generators + literature reconstruction (provenance in `PROVENANCE.md`) |
-| [`docs/`](docs/) | MkDocs site: physics, architecture, calibration, verification, gallery, roadmap, ADRs |
-| [`figures/`](figures/) | Generated figures (regenerate with `ferrumize figures`) |
-| [`brand/`](brand/) | Visual identity assets (mark, lockups, favicon) |
+| [`components/`](components/) | The three Tesseract components: thermal, carburizing, and hardening. |
+| [`components/shared/ferrumizer_physics/`](components/shared/ferrumizer_physics/) | Shared thermal, carbon, hardening, and alloy physics. |
+| [`app/ferrumize/`](app/ferrumize/) | CLI, pipeline composition, differentiable model, and figure generation. |
+| [`app/calibration/`](app/calibration/) | NumPyro NUTS calibration and convergence gates. |
+| [`app/design/`](app/design/) | Gradient-based schedule design and Pareto analysis. |
+| [`app/identifiability/`](app/identifiability/) | Fisher-information and correlation analysis. |
+| [`app/ingest/`](app/ingest/) | PLC/datalogger ingestion. |
+| [`app/streamlit_app.py`](app/streamlit_app.py) | Virtual Furnace application. |
+| [`verification/`](verification/) | V1–V9 and quench verification scripts. |
+| [`tests/`](tests/) | Unit and regression tests. |
+| [`data/`](data/) | Synthetic traverse generation and literature reconstruction. |
+| [`docs/`](docs/) | MkDocs documentation, physics, architecture, calibration, verification, gallery, roadmap, and ADRs. |
+| [`figures/`](figures/) | Generated figures. |
+| [`brand/`](brand/) | Visual identity assets. |
 
 ---
 
 ## Documentation
 
-The MkDocs site ([docs/](docs/)) is the full reference:
+The full documentation is available in [`docs/`](docs/).
 
-- [docs/reproducing.md](docs/reproducing.md) — **how to recreate everything**: requirements, complete command list with run times/RAM, regeneration recipes, app feature list, pitfalls
-- [docs/index.md](docs/index.md) — overview
-- [docs/physics.md](docs/physics.md) — physics derivations and constants
-- [docs/architecture.md](docs/architecture.md) — pipeline and container composition
-- [docs/calibration.md](docs/calibration.md) — Bayesian calibration workflow + runtime expectations
-- [docs/design.md](docs/design.md) — schedule design and the Pareto front
-- [docs/verification.md](docs/verification.md) — the gate table
-- [docs/gallery.md](docs/gallery.md) — figure gallery
-- [docs/roadmap.md](docs/roadmap.md) — future work
+- [docs/design-rationale.md](docs/design-rationale.md) — detailed design
+  rationale, glossary, Tesseract architecture, gradient workflows, and design
+  decisions.
+- [docs/reproducing.md](docs/reproducing.md) — environment requirements,
+  reproduction commands, runtime and memory measurements, artifact
+  generation, application features, and known constraints.
+- [docs/index.md](docs/index.md) — documentation overview.
+- [docs/physics.md](docs/physics.md) — physics derivations and constants.
+- [docs/architecture.md](docs/architecture.md) — pipeline and container
+  composition.
+- [docs/calibration.md](docs/calibration.md) — Bayesian calibration workflow
+  and runtime expectations.
+- [docs/design.md](docs/design.md) — schedule design and Pareto optimization.
+- [docs/verification.md](docs/verification.md) — verification gate
+  definitions.
+- [docs/gallery.md](docs/gallery.md) — figure gallery.
+- [docs/roadmap.md](docs/roadmap.md) — planned development.
 - [docs/adr/ADR-001-carbon-diffusion-prefactor.md](docs/adr/ADR-001-carbon-diffusion-prefactor.md)
+  — carbon-diffusion prefactor decision record.
 - [docs/adr/ADR-002-calibration-surrogate.md](docs/adr/ADR-002-calibration-surrogate.md)
+  — calibration surrogate decision record.
 
 ---
 
-## Citation & license
+## Citation and license
 
-Apache-2.0. See [CITATION.cff](CITATION.cff) for the citation metadata and
-[CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines. To reproduce
-anything in this repository — a gate, a figure, a number — start at
-[docs/reproducing.md](docs/reproducing.md): requirements, the full command
-list with run times and memory costs, and step-by-step regeneration of every
-artifact.
+Ferrumizer is released under the Apache-2.0 license. Citation metadata is
+provided in [CITATION.cff](CITATION.cff), and contribution guidelines are
+available in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-**Track: 04 — Differentiable inference & UQ** (cross-track with 02 —
-Multi-physics & coupled systems). Ferrumizer is a Tesseract Hackathon 2026
-submission by riot' — built with the Tesseract framework from Pasteur Labs /
-Institute for Simulation Intelligence.
+For reproduction of verification gates, figures, datasets, and reported
+results, start with [docs/reproducing.md](docs/reproducing.md).
+
+Track: 04 — Differentiable Inference & UQ
+Cross-track: 02 — Multi-Physics & Coupled Systems
+
+Ferrumizer is a Tesseract Hackathon 2026 submission by riot', built with the
+Tesseract framework from Pasteur Labs / Institute for Simulation
+Intelligence.

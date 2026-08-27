@@ -10,11 +10,11 @@ requirements, the complete command list with observed run times and memory
 costs, step-by-step regeneration of each artifact class, and what to watch
 out for.
 
-All timings and memory numbers below are **measurements on one reference
-machine** (7 GB RAM + 7 GB swap, 4 vCPUs, AMD EPYC 7402, CPU-only JAX, Python
-3.12.3, dependencies at the pinned versions below). They are reference
-values, not requirements — expect your machine to be faster, not slower,
-and nothing here requires a GPU.
+All timings and memory numbers below are **measured process costs** — wall
+time and peak RSS of the actual command, not estimates or machine specs.
+They were measured on a 4-vCPU AMD EPYC with CPU-only JAX and Python 3.12.3
+at the pinned dependency versions below; a faster machine simply runs them
+faster. Nothing here requires a GPU, and no number below is a minimum spec.
 
 - [What "reproduce" covers](#what-reproduce-covers)
 - [Requirements](#requirements)
@@ -53,20 +53,21 @@ Key pins: `jax[cpu]==0.11.1`, `numpy==2.2.6`, `scipy==1.18.1`,
 `pydantic==2.13.4`, `numpyro==0.21.0`, `equinox==0.13.8`,
 `tesseract-core[runtime]==1.11.0`, `tesseract-jax==0.4.1`.
 
-**Disk & memory (observed on the reference machine):**
+**Disk & memory (measured):**
 
 | | Observed value |
 |---|---|
 | Installed venv (`.venv`) | 1.6 GB |
 | Repository itself (excl. venv/.git) | 56 MB |
 | `ferrumize app` process | ~230 MB RSS (two Streamlit processes) |
+| `ferrumize simulate` (single forward run) | ~350 MB peak RSS |
 | `verify` V6 gate process | 1.9 GB peak RSS (5 min 28 s wall) |
 | `verify` V7 gate | 3 h 42 min for 200 posteriors (wall) |
-| Full install (venv + checkout + working headroom) | ~2.5 GB |
+| Full install (venv + checkout) | ~2.5 GB |
 
-The reference machine had 7 GB RAM + 7 GB swap and ran everything fine; it
-simply got slower under concurrent load (see Pitfalls). Larger machines just
-need fewer workarounds.
+The day-to-day surfaces (app, a single CLI run) stay under ~400 MB; only the
+one-off verification and regeneration suites push past it, and even those
+peak at ~2 GB.
 
 ## Step-by-step reproduction
 
@@ -149,8 +150,8 @@ and fall into two groups:
 reproducible: the deterministic figures come out byte-identical (verified),
 and the stochastic ones (F6) reproduce distributionally.
 
-Observed per-figure times from a clean full `ferrumize figures` run on the
-reference machine (the command prints each figure's elapsed time):
+Observed per-figure times from a clean full `ferrumize figures` run (the
+command prints each figure's elapsed time):
 
 | Figure | Time | What it runs under the hood |
 |---|---|---|
@@ -229,13 +230,12 @@ you build here reproduces headlessly:
   pre-fix output. The fix was a full `ferrumize figures` + (where needed)
   `make data` regeneration, committed together with the physics change. If
   you touch `components/shared/ferrumizer_physics/`, plan to regenerate.
-- **On machines where RAM is tighter than the working set, set
+- **On machines where RAM is tight, set
   `XLA_PYTHON_CLIENT_PREALLOCATE=false`.** It doesn't change results, only
-  JAX's memory behavior. The reference machine (7 GB + 7 GB swap) ran
-  everything with it set; under concurrent heavy jobs it slowed jobs down
-  2–4×, and one full figure regeneration was once OOM-killed by the OS —
-  the fix was just re-running it in smaller `--only` batches. One heavy job
-  at a time is the general rule.
+  JAX's memory behavior. All runs in this repository used it; under
+  concurrent heavy jobs it slowed jobs down 2–4×, and one full figure
+  regeneration was once OOM-killed by the OS — the fix was just re-running it
+  in smaller `--only` batches. One heavy job at a time is the general rule.
 - **Don't kill the app process to free RAM** — every artifact (figures,
   gates, data) is produced by the CLI, never by the running app. The app is
   a read-only consumer of the same engine.
