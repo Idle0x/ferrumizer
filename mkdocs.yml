@@ -13,6 +13,7 @@ theme:
     code: JetBrains Mono
 nav:
   - Home: index.md
+  - Reproducing everything: reproducing.md
   - Physics: physics.md
   - Architecture: architecture.md
   - Verification: verification.md

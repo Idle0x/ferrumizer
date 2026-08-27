@@ -28,6 +28,10 @@ Global options (before the command):
 
 ## Notes
 
+Run times and memory costs per command, plus requirements (minimum vs
+recommended) and the pitfalls of running the long jobs, are in
+[reproducing.md](reproducing.md).
+
 - `calibrate` output is **blocked from release** unless the convergence gates
   pass — a gate failure is a nonzero exit, not a warning.
 - `design` reports the physically reachable ECD range when the target is

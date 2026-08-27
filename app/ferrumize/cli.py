@@ -656,13 +656,33 @@ def verify(
 def figures(
     out: Path = typer.Option(Path("figures"), "--out", help="Figures directory."),
     only: str = typer.Option(None, "--only", help="Comma-separated subset, e.g. F3,F6."),
+    config: Path = typer.Option(
+        None,
+        "--config",
+        exists=True,
+        help=(
+            "Run-config YAML (same schema as `simulate`/`calibrate`). When given, "
+            "the process-showcase figures F1 (hero), F6 (posterior) and F10 "
+            "(alloy strip) are rendered for this alloy/schedule. The "
+            "solver-validation (F3, F4, F5, F7) and method (F2, F8, F9) figures "
+            "are fixed by design — they test the code or a protocol, not a part."
+        ),
+    ),
+    seed: int = typer.Option(
+        0, "--seed", help="Seed for the randomized figures (F6 noise traverse + NUTS)."
+    ),
 ):
     """Regenerate figures F1-F10 deterministically (seeded).
 
     Slow figures (F6 NUTS posterior, F7 noise sweep, F9 Pareto) run first and
     print their elapsed time; use --only to regenerate a subset.
+
+    With no --config the figures are the canonical 8620 case (seed 0) and are
+    byte-identical to the ones in the README. Pass --config to make your own:
+
+        ferrumize figures --config my_case.yaml --seed 1
     """
-    from ferrumize.figures import generate_all
+    from ferrumize.figures import build_case, generate_all
 
     out.mkdir(parents=True, exist_ok=True)
     if only:
@@ -681,18 +701,25 @@ def figures(
             "F9": figmod.fig_f9_pareto,
             "F10": figmod.fig_f10_alloys,
         }
+        takes_case = {"F1", "F6", "F10"}
         for name in sorted(wanted):
             if name not in mapping:
                 _fail(f"Unknown figure {name} (valid: {','.join(sorted(mapping))})")
+        case = build_case(config, seed)
+        if case is not None:
+            typer.echo(f"[figures] custom case: alloy={case['scenario'].alloy} -> F1, F6, F10")
         import time as _time
 
         for name in sorted(wanted):
             t0 = _time.time()
             typer.echo(f"[figures] {name} ...")
-            mapping[name](out)
+            if name in takes_case:
+                mapping[name](out, case)
+            else:
+                mapping[name](out)
             typer.echo(f"[figures] {name} done in {_time.time() - t0:.1f}s")
     else:
-        generate_all(out, seed=_state["seed"])
+        generate_all(out, seed=seed, config=config)
     typer.secho(f"Figures written to {out}/", fg=typer.colors.GREEN)
 
 

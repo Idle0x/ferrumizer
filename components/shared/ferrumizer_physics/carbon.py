@@ -50,7 +50,7 @@ def D_of_T_np(D0: float, Q_J: float, T_K) -> np.ndarray:
 
 
 def _is_tracer(x) -> bool:
-    return isinstance(x, (jax.core.Tracer, jax.Array))
+    return isinstance(x, jax.core.Tracer | jax.Array)
 
 
 def stability_check_carbon(

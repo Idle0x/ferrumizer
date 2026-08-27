@@ -18,6 +18,20 @@ gradients to (a) **calibrate** process parameters against measured hardness
 traverses with full Bayesian uncertainty, and (b) **design** furnace schedules
 that hit a target effective case depth (ECD) with an energy trade-off.
 
+> ### 🔁 Reproducing everything
+> Every gate, figure, and dataset in this repo is built by a documented,
+> seeded command — no hidden state, no screenshots.
+> **→ [`docs/reproducing.md`](docs/reproducing.md)** is the single reference:
+> minimum/recommended requirements, the complete command list with run times
+> and memory costs, step-by-step regeneration of every artifact, the full app
+> feature list, and the pitfalls (what's slow, what eats RAM, when bytes must
+> match).
+>
+> Short version: `uv sync --extra app --extra dev --extra docs` → `make data`
+> → `ferrumize verify --fast` (≈4 min) → `ferrumize figures` (≈30 min) →
+> `ferrumize app`. Python 3.12+, CPU-only, 8 GB RAM minimum / 16 GB
+> recommended.
+
 ---
 
 ## Table of contents
@@ -31,12 +45,13 @@ that hit a target effective case depth (ECD) with an energy trade-off.
 7. [The figures: what each one proves](#the-figures-what-each-one-proves)
 8. [Physics model reference](#physics-model-reference)
 9. [Verification](#verification)
-10. [Extending Ferrumizer](#extending-ferrumizer)
-11. [Honest limitations](#honest-limitations)
-12. [Future work](#future-work)
-13. [Repository layout](#repository-layout)
-14. [Documentation](#documentation)
-15. [Citation & license](#citation--license)
+10. [Reproducing everything](docs/reproducing.md) — requirements, full command list with times/RAM, regeneration recipes
+11. [Extending Ferrumizer](#extending-ferrumizer)
+12. [Honest limitations](#honest-limitations)
+13. [Future work](#future-work)
+14. [Repository layout](#repository-layout)
+15. [Documentation](#documentation)
+16. [Citation & license](#citation--license)
 
 ---
 
@@ -244,7 +259,8 @@ ferrumize design 0.15 --alloy 8620 --penalty energy
 ferrumize ingest /path/to/plc.log --out results/ingested
 ferrumize verify            # full gate table
 ferrumize verify --fast     # same, minus the two long gates (V6, V7) — CI
-ferrumize figures
+ferrumize figures           # canonical case (byte-identical to the README)
+ferrumize figures --config my_case.yaml --seed 1   # F1/F6/F10 for YOUR case
 ```
 
 **2. Browser (Streamlit app)** — interactive "what-if" surface:
@@ -295,7 +311,8 @@ gives the per-figure regeneration command.
 | `ferrumize ingest PLC_LOG` | Parse a messy furnace PLC/datalogger export into normalized trajectory + traverse. |
 | `ferrumize verify` | Run the V1–V9 + quench gate table. |
 | `ferrumize verify --fast` | Same, but skip the two slow gates (V6 recovery, V7 200-sim SBC) so CI finishes in minutes. What CI runs. |
-| `ferrumize figures` | Regenerate all figures deterministically (seeded). |
+| `ferrumize figures` | Regenerate all 10 figures deterministically (seed 0, canonical 8620 case — byte-identical to the README). |
+| `ferrumize figures --config C.yaml [--seed N]` | Render the process-showcase figures F1/F6/F10 for *your* alloy/schedule (same YAML as `simulate`/`calibrate`). The 7 validation/method figures are fixed by design. |
 | `ferrumize app` | Launch the Streamlit Virtual Furnace. |
 
 The app (`ferrumize app`) is the interactive surface: drag schedule, quench,
@@ -354,6 +371,49 @@ so anyone can reproduce them bit-for-bit with `ferrumize figures` (or
 `ferrumize figures --only F3,F8` for a subset). They are *not* screenshots of
 the app: they are the same physics, rendered as publication artifacts.
 
+**Which figures are "yours" to configure, and which aren't.** The ten figures
+are two different animals:
+
+- **F3, F4, F5, F7** are *solver-validation* figures — convergence order,
+  FD-vs-autodiff agreement, error-vs-noise bounds. They test that the **code
+  is correct**, not that a specific part behaves a certain way. Threading your
+  schedule into a convergence-order plot would be meaningless, so they are
+  fixed by design.
+- **F2, F8, F9** are *method* figures (architecture, two-schedule
+  identifiability, ECD-vs-energy Pareto front). They demonstrate a specific
+  protocol, likewise fixed.
+- **F1 (hero loop), F6 (posterior), F10 (profiles)** are *process* figures —
+  the engine applied to a case. **These three accept your own parameters:**
+
+  ```bash
+  # the shipped case (canonical 8620, seed 0 — byte-identical to these pages)
+  ferrumize figures --only F1,F6,F10
+
+  # YOUR case: same YAML you already give to `simulate` / `calibrate`
+  ferrumize figures --only F1,F6,F10 --config my_case.yaml --seed 1
+  ```
+
+  A config like `my_case.yaml`:
+
+  ```yaml
+  alloy: 9310
+  geometry: slab
+  size_mm: 25.0
+  t_total: 3600
+  schedule:
+    times:   [0.0, 1200.0, 3600.0]
+    temps_C: [980.0, 980.0, 940.0]
+  params:
+    C_pot: 0.9
+  ```
+
+  One YAML then drives `validate` → `simulate` → `calibrate` → `figures`
+  (the exact same config machinery the other commands use).
+
+The most flexible surface is still the app — drag schedule, quench, alloy and
+size interactively. The CLI and this figures flag are the headless equivalent
+for your own numbers.
+
 ### F1 — The hero loop: one heat treatment, animated
 
 ![F1](figures/F1_hero_loop.gif)
@@ -362,7 +422,8 @@ What it shows: a single carburizing cycle, animated. Furnace schedule → part
 temperature → carbon soaking into the surface → hardness profile → ECD number
 counting up. This is the ten-second answer to "what does this tool do?"
 
-How to regenerate: `ferrumize figures --only F1`.
+How to regenerate: `ferrumize figures --only F1` — or your own schedule via
+`--config my_case.yaml` (see [above](#the-figures-what-each-one-proves)).
 
 ### F2 — Architecture
 
@@ -417,7 +478,9 @@ data pins the parameter; wide/flat marginals mean it does not (see F8). The
 convergence gates (R̂, ESS) are enforced separately by the CLI.
 
 How to regenerate: `ferrumize figures --only F6` (needs a calibration run —
-see `docs/calibration.md`).
+see `docs/calibration.md`). To calibrate *your* case instead of the canonical
+8620 one, add `--config my_case.yaml` (the synthetic traverse is derived from
+the same scenario, so the posterior is for your alloy/schedule).
 
 ### F7 — Robustness: recovery vs measurement noise
 
@@ -460,7 +523,8 @@ What it shows: the same recipe applied to the three shipped alloys, side by
 side, each labeled with its resulting ECD — the comparison view across 8620 /
 9310 / 5120.
 
-How to regenerate: `ferrumize figures --only F10`.
+How to regenerate: `ferrumize figures --only F10` — or your own alloy/schedule
+via `--config my_case.yaml` (renders a single-alloy strip for that case).
 
 ---
 
@@ -598,6 +662,7 @@ Realistic, not hype:
 
 The MkDocs site ([docs/](docs/)) is the full reference:
 
+- [docs/reproducing.md](docs/reproducing.md) — **how to recreate everything**: requirements, complete command list with run times/RAM, regeneration recipes, app feature list, pitfalls
 - [docs/index.md](docs/index.md) — overview
 - [docs/physics.md](docs/physics.md) — physics derivations and constants
 - [docs/architecture.md](docs/architecture.md) — pipeline and container composition
@@ -614,7 +679,11 @@ The MkDocs site ([docs/](docs/)) is the full reference:
 ## Citation & license
 
 Apache-2.0. See [CITATION.cff](CITATION.cff) for the citation metadata and
-[CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+[CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines. To reproduce
+anything in this repository — a gate, a figure, a number — start at
+[docs/reproducing.md](docs/reproducing.md): requirements, the full command
+list with run times and memory costs, and step-by-step regeneration of every
+artifact.
 
 **Track: 04 — Differentiable inference & UQ** (cross-track with 02 —
 Multi-physics & coupled systems). Ferrumizer is a Tesseract Hackathon 2026

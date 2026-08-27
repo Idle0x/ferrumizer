@@ -54,6 +54,54 @@ def _save(fig, path: Path):
 
 
 # --------------------------------------------------------------------------- #
+# Canonical case + user-config plumbing
+#
+# The 10 figures are two different animals:
+#   * solver-validation (F3 erfc, F4 MMS, F5 cross-AD, F7 noise sweep) and
+#     method figures (F2 architecture, F8 identifiability, F9 Pareto) test the
+#     *code / a protocol*, not a specific part — they are intentionally fixed.
+#   * process-showcase figures (F1 hero, F6 posterior, F10 alloy strip) apply
+#     the engine to a *case*. Those three accept an optional ``case`` built
+#     from a run-config YAML so a reviewer can regenerate their own hero,
+#     posterior, and profiles with their own alloy / schedule / params.
+# Passing no config reproduces the canonical 8620 case byte-for-byte, so the
+# shipped figures (and CI) stay deterministic.
+# --------------------------------------------------------------------------- #
+def build_case(config: str | Path | None, seed: int = 0):
+    """Return ``{"scenario", "params"}`` from a run-config YAML, or None.
+
+    Uses the same ``load_config`` / ``scenario_from_config`` /
+    ``params_from_config`` the CLI's ``simulate`` / ``calibrate`` use, so a
+    single YAML drives validate → simulate → calibrate → figures. The grid is
+    deliberately light (21 nodes, dt=2 s) — figure resolution, not production.
+    """
+    if not config:
+        return None
+    from ferrumize.config import (
+        load_config,
+        params_from_config,
+        scenario_from_config,
+        validate_config,
+    )
+
+    cfg = load_config(config)
+    errors = validate_config(cfg)
+    if errors:
+        raise SystemExit("figures: invalid run-config:\n  " + "\n  ".join(errors))
+    # Light grid for figures (the canonical case uses these exact values).
+    cfg = {
+        **cfg,
+        "thermal": {**cfg.get("thermal", {}), "n": 21, "sample_every": 20},
+        "carbon": {**cfg.get("carbon", {}), "n": 21, "dt": 2.0, "sample_every": 30},
+    }
+    return {
+        "scenario": scenario_from_config(cfg),
+        "params": params_from_config(cfg),
+        "seed": seed,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # F3 — erfc overlay
 # --------------------------------------------------------------------------- #
 def fig_f3_erfc(out: Path):
@@ -262,20 +310,27 @@ def fig_f9_pareto(out: Path):
 # --------------------------------------------------------------------------- #
 # F10 — alloy strip
 # --------------------------------------------------------------------------- #
-def fig_f10_alloys(out: Path):
-    alloys = ["8620", "9310", "5120"]
-    fig, axes = plt.subplots(1, 3, figsize=(12.0, 3.8), sharey=True)
+def fig_f10_alloys(out: Path, case: dict | None = None):
+    # A user case renders its single alloy; the canonical case is a 3-alloy strip.
+    alloys = [case["scenario"].alloy] if case is not None else ["8620", "9310", "5120"]
+    n = len(alloys)
+    fig, axes = plt.subplots(1, n, figsize=(4.0 * n, 3.8), sharey=True)
+    axes = [axes] if n == 1 else axes
     for ax, alloy in zip(axes, alloys):
-        scenario = Scenario(
-            alloy=alloy,
-            t_total=7200.0,
-            schedule_times=(0.0, 7200.0),
-            schedule_temps_C=(950.0, 950.0),
-            thermal_n=21,
-            carbon_n=41,
-            carbon_dt=2.0,
-        )
-        pipe = FerrumizerPipeline(scenario, ProcessParams())
+        if case is not None:
+            scenario, params = case["scenario"], case["params"]
+        else:
+            scenario = Scenario(
+                alloy=alloy,
+                t_total=7200.0,
+                schedule_times=(0.0, 7200.0),
+                schedule_temps_C=(950.0, 950.0),
+                thermal_n=21,
+                carbon_n=41,
+                carbon_dt=2.0,
+            )
+            params = ProcessParams()
+        pipe = FerrumizerPipeline(scenario, params)
         res = pipe.forward()
         x = np.asarray(res["x_mm"])
         ax.plot(x, np.asarray(res["carbon"]["C_final"]), color=GOLD, lw=1.8, label="C, mass-%")
@@ -303,19 +358,22 @@ def fig_f10_alloys(out: Path):
 # --------------------------------------------------------------------------- #
 # F1 — hero chain-loop animation (GIF)
 # --------------------------------------------------------------------------- #
-def fig_f1_hero(out: Path):
-    scenario = Scenario(
-        alloy="8620",
-        t_total=1800.0,
-        schedule_times=(0.0, 1800.0),
-        schedule_temps_C=(950.0, 950.0),
-        thermal_n=21,
-        thermal_sample_every=20,
-        carbon_n=21,
-        carbon_dt=2.0,
-        carbon_sample_every=30,
-    )
-    pipe = FerrumizerPipeline(scenario, ProcessParams())
+def fig_f1_hero(out: Path, case: dict | None = None):
+    if case is not None:
+        scenario = case["scenario"]
+    else:
+        scenario = Scenario(
+            alloy="8620",
+            t_total=1800.0,
+            schedule_times=(0.0, 1800.0),
+            schedule_temps_C=(950.0, 950.0),
+            thermal_n=21,
+            thermal_sample_every=20,
+            carbon_n=21,
+            carbon_dt=2.0,
+            carbon_sample_every=30,
+        )
+    pipe = FerrumizerPipeline(scenario, case["params"] if case is not None else ProcessParams())
     res = pipe.forward()
 
     times = np.asarray(res["thermal"]["times_s"])
@@ -463,44 +521,61 @@ def fig_f2_architecture(out: Path):
 # --------------------------------------------------------------------------- #
 # F6 — posterior pairplot
 # --------------------------------------------------------------------------- #
-def fig_f6_posterior(out: Path):
+def fig_f6_posterior(out: Path, case: dict | None = None):
     from calibration.calibrate import run_calibration
     from ferrumize.models import fast_forward
 
-    preset = load_alloy("8620")
+    seed = case["seed"] if case is not None else 0
+    scenario = (
+        case["scenario"]
+        if case is not None
+        else Scenario(
+            alloy="8620",
+            t_total=1800.0,
+            schedule_times=(0.0, 1800.0),
+            schedule_temps_C=(950.0, 950.0),
+            thermal_n=21,
+            carbon_n=21,
+            carbon_dt=2.0,
+        )
+    )
+    # F6 samples h_m, which only exists under the mass-transfer (Robin) BC;
+    # the synthetic traverse and the calibration must therefore both use it.
+    scenario = Scenario(**{**scenario.__dict__, "carbon_mode": "mass_transfer"})
+    if case is not None:
+        p = case["params"]
+        preset = load_alloy(scenario.alloy)
+        log_D0, Q_kJ, C_pot, h_m, eps = p.D0, p.Q_kJ, p.C_pot, p.h_m, p.eps
+    else:
+        preset = load_alloy("8620")
+        log_D0, Q_kJ, C_pot, h_m, eps = 2.2e-5, 137.0, 1.0, 1e-4, 0.8
     th = preset["thermal"]
-    knots = jnp.array([[0.0, 1800.0], [950.0, 950.0]], dtype=jnp.float64)
+    half_thickness_m = scenario.size_mm / 2000.0  # mm -> m
+    knots = jnp.array(
+        list(zip(scenario.schedule_times, scenario.schedule_temps_C)), dtype=jnp.float64
+    )
     res = fast_forward(
-        jnp.log(jnp.float64(2.2e-5)),
-        jnp.float64(137.0),
-        jnp.float64(1.0),
-        jnp.float64(1e-4),
-        jnp.float64(0.8),
+        jnp.log(jnp.float64(log_D0)),
+        jnp.float64(Q_kJ),
+        jnp.float64(C_pot),
+        jnp.float64(h_m),
+        jnp.float64(eps),
         schedule_knots=knots,
-        t_total=1800.0,
-        T_init_K=298.15,
-        T_quench=298.15,
-        h_conv=20.0,
+        t_total=scenario.t_total,
+        T_init_K=scenario.T_init_K,
+        T_quench=scenario.T_quench,
+        h_conv=scenario.h_conv,
         k=th["k"],
         rho_cp=th["rho"] * th["cp"],
-        half_thickness_m=0.008,
-        x_half_mm=8.0,
-        carbon_n=21,
-        carbon_dt=2.0,
-        carbon_mode="dirichlet",
+        half_thickness_m=half_thickness_m,
+        x_half_mm=scenario.size_mm / 2.0,
+        carbon_n=scenario.carbon_n,
+        carbon_dt=scenario.carbon_dt,
+        carbon_mode=scenario.carbon_mode,
         preset=preset,
         n_T_samples=60,
     )
-    scenario = Scenario(
-        alloy="8620",
-        t_total=1800.0,
-        schedule_times=(0.0, 1800.0),
-        schedule_temps_C=(950.0, 950.0),
-        thermal_n=21,
-        carbon_n=21,
-        carbon_dt=2.0,
-    )
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(seed)
     obs_depths = np.asarray(res["x_mm"])[::4]
     obs_H = np.asarray(res["H"])[::4] + rng.normal(0, 10.0, size=len(np.asarray(res["x_mm"])[::4]))
 
@@ -511,7 +586,7 @@ def fig_f6_posterior(out: Path):
         num_warmup=200,
         num_samples=200,
         num_chains=1,
-        seed=0,
+        seed=seed,
     )
     samples = mcmc.get_samples(group_by_chain=False)
     names = ["log_D0", "Q_kJ", "C_pot", "log_hm", "eps"]
@@ -567,8 +642,20 @@ def fig_f7_noise_sweep(out: Path):
     _save(fig, out / "F7_noise_sweep.png")
 
 
-def generate_all(out: Path, seed: int = 0):
+def generate_all(
+    out: Path,
+    seed: int = 0,
+    config: str | Path | None = None,
+):
     """Generate all figures F1-F10 into ``out``.
+
+    ``config`` is a run-config YAML (same schema as ``ferrumize simulate`` /
+    ``calibrate``). When given, the *process-showcase* figures — F1 hero,
+    F6 posterior, F10 alloy strip — are rendered for that alloy/schedule.
+    The solver-validation (F3, F4, F5, F7) and method (F2, F8, F9) figures
+    are fixed by design: they test the code or a protocol, not a part.
+    ``seed`` seeds the randomized figures (currently F6's synthetic-noise
+    traverse). No config + seed 0 reproduces the shipped figures exactly.
 
     Slow, compute-heavy figures (F6 NUTS posterior, F7 noise sweep, F9 Pareto)
     are scheduled FIRST so a CI time-box never leaves the headline figures
@@ -578,6 +665,13 @@ def generate_all(out: Path, seed: int = 0):
     np.random.seed(seed)
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
+
+    case = build_case(config, seed)
+    if case is not None:
+        sc = case["scenario"]
+        print(f"[figures] custom case: alloy={sc.alloy} t_total={sc.t_total:.0f}s -> F1, F6, F10")
+    else:
+        print("[figures] canonical case (8620, seed 0)")
 
     generators = [
         ("F6", fig_f6_posterior),
@@ -596,5 +690,8 @@ def generate_all(out: Path, seed: int = 0):
     for name, fn in generators:
         t0 = _time.time()
         print(f"[figures] {name} ...")
-        fn(out)
+        if name in ("F1", "F6", "F10"):
+            fn(out, case)
+        else:
+            fn(out)
         print(f"[figures] {name} done in {_time.time() - t0:.1f}s")
