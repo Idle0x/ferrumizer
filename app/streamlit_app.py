@@ -119,6 +119,11 @@ st.caption(
     "Ferrumizer process emulator · gas carburizing end-to-end · ISO 2639 practice (550 HV) · "
     "finite-rate quench model"
 )
+st.caption(
+    "Built with **Tesseract** for the Tesseract Hackathon 2026 — "
+    "Pasteur Labs / ISI. Track 04: differentiable inference & UQ, "
+    "cross-track 02 (multi-physics)."
+)
 
 # --------------------------------------------------------------------------- #
 # Shared plot styling (fixed axes so physics is visible, not auto-scaled away)
@@ -1106,3 +1111,16 @@ with tab_ingest:
                 )
         if not report.has_trajectory and not report.has_traverse:
             st.error("No recognizable time/temperature or depth/hardness columns found.")
+
+# --------------------------------------------------------------------------- #
+# Footer (outside the tabs — shows at the bottom of whichever tab is active)
+# --------------------------------------------------------------------------- #
+st.divider()
+st.caption(
+    "The app is the interactive face of one differentiable pipeline built from "
+    "three Tesseract components: **thermal** (JAX heat conduction), "
+    "**carburizing** (a legacy NumPy finite-difference box, deliberately not "
+    "autodiffed), and **hardening** (JAX phase kinetics). Gradients flow "
+    "end-to-end from furnace schedule to case depth — that's what calibration "
+    "and design run backward through."
+)
