@@ -67,6 +67,14 @@ ferrumize calibrate data/synthetic/calibration_data.yaml --chains 2 --draws 300
 #    90% credible band) is written to ppc_hardness.png in the output dir.
 ```
 
+> **`ferrumize: command not found`?** Install it once from the repo root:
+> `uv tool install -e . --with streamlit`. Already installed but still not
+> found? Make sure `~/.local/bin` is on your `PATH`, or run
+> `source .venv/bin/activate` before the command (requires `uv sync`).
+
+The config YAML references its traverse CSVs relative to the YAML's own
+location, so keep the YAML and its CSVs in the same directory.
+
 The app's **Cycle Predictor** tab runs the same code with a light grid
 (`carbon_n=41, dt=8 s`) and an upfront runtime warning — the light grid is
 for interactivity, not for research-grade posteriors.

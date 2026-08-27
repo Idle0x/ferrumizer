@@ -43,6 +43,11 @@ ferrumize design 0.15 --alloy 8620 --penalty energy     # Pareto front
 ferrumize design 0.15 --config my_furnace.yaml          # from a config
 ```
 
+> **`ferrumize: command not found`?** Install it once from the repo root:
+> `uv tool install -e . --with streamlit`. Already installed but still not
+> found? Make sure `~/.local/bin` is on your `PATH`, or run
+> `source .venv/bin/activate` before the command (requires `uv sync`).
+
 - The target is in **mm of effective case depth at 550 HV**.
 - `--penalty energy` sweeps penalty weights and writes the **Pareto front**
   (figure F9): how much case depth must be given up to save gas. The energy

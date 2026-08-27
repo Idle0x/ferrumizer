@@ -50,6 +50,11 @@ piecewise-linear `furnace_T` reproduces the logged behavior exactly.
 ferrumize ingest /path/to/plc_export.log --out results/ingested
 ```
 
+> **`ferrumize: command not found`?** Install it once from the repo root:
+> `uv tool install -e . --with streamlit`. Already installed but still not
+> found? Make sure `~/.local/bin` is on your `PATH`, or run
+> `source .venv/bin/activate` before the command (requires `uv sync`).
+
 Writes `results/ingested/ingested.json` containing the normalized trajectory,
 any extracted hardness traverse, the compressed schedule, and the warnings
 the parser emitted.

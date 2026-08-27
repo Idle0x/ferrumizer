@@ -33,6 +33,10 @@ package. It uses documented one-dimensional approximations and
 literature-anchored parameters for fast simulation, calibration,
 optimization, and methodological validation.
 
+For reproduction, see [docs/reproducing.md](docs/reproducing.md); for the
+design choices and rationale, see
+[docs/design-rationale.md](docs/design-rationale.md).
+
 ---
 
 ## Table of contents
@@ -219,6 +223,8 @@ verifies gradient propagation through the containerized composition.
 Tesseract provides the execution boundary between the independently developed
 physics components.
 
+**Why Tesseract for this project:**
+
 The three stages have different computational characteristics:
 
 - the thermal stage is JAX-native;
@@ -243,6 +249,29 @@ through the containerized composition.
 The Tesseract architecture is therefore part of the computational design, not
 simply a packaging layer.
 
+**Why Track 04 (Differentiable inference & UQ):**
+
+the rubric explicitly names
+this track as "an expensive or black-box solver wrapped as a Tesseract and
+dropped into a probabilistic workflow for Bayesian calibration... the solver
+may expose its Jacobian by autodiff or by finite differences; the composition
+with the inference engine is the contribution." That is precisely the
+architecture here: NumPyro NUTS over a Tesseract-wrapped solver that exposes
+its Jacobian both ways. Cross-track 02 because the pipeline is inherently
+multi-physics (thermal → carbon → hardening) and the inverse problem spans
+all three stages.
+
+**Why not another approach:**
+
+a monolithic JAX reimplementation of all three
+stages would be simpler to write but would *remove the boundary* — the thing
+the competition rewards. A commercial-FE wrapper (e.g. PyMAPDL/ANSYS, which
+won 2025) would be impressive but closed, heavy, and unverifiable in a
+hackathon window. The chosen design keeps the legacy box honest, the gradients
+provable, and the whole thing reproducible on a laptop.
+
+Find out more about the tesseract integration and design choices in: [docs/reproducing.md](docs/reproducing.md) and [docs/design-rationale.md](docs/design-rationale.md).
+
 ---
 
 ## Quickstart
@@ -251,8 +280,8 @@ simply a packaging layer.
 git clone https://github.com/Idle0x/ferrumizer.git
 cd ferrumizer
 
-uv sync --extra app --extra dev --extra docs
-make data
+uv tool install -e . --with streamlit    # puts `ferrumize` on PATH, no activation
+uv sync --extra app --extra dev --extra docs   # full dev environment (tests, docs)
 
 ferrumize verify --fast
 ferrumize verify
@@ -261,8 +290,19 @@ ferrumize figures
 ferrumize app
 ```
 
-The extras are exclusive, so include all three when setting up the full
-development environment.
+The two setup lines are independent:
+
+- `uv tool install -e . --with streamlit` makes `ferrumize` available in every
+  shell without activation. `-e` installs the package editable, so code edits
+  are picked up without reinstalling; `--with streamlit` pulls the app
+  dependency, which is an optional extra rather than a core requirement.
+- `uv sync --extra app --extra dev --extra docs` builds the development venv
+  (the extras are disjoint, so include all three for a complete setup). It
+  is also the fallback path: if `ferrumize` is not found after the tool
+  install, run `source .venv/bin/activate` — the venv contains the same CLI.
+
+The synthetic datasets under `data/` are committed, so nothing else is needed
+before the first `ferrumize` command. `make data` (venv) regenerates them.
 
 ### Verification
 
@@ -333,6 +373,11 @@ ferrumize figures
 
 ferrumize figures --config my_case.yaml --seed 1
 ```
+
+> **`ferrumize: command not found`?** Install it once from the repo root:
+> `uv tool install -e . --with streamlit`. Already installed but still not
+> found? Make sure `~/.local/bin` is on your `PATH`, or run
+> `source .venv/bin/activate` before the command (requires `uv sync`).
 
 ### Streamlit application
 
@@ -477,6 +522,11 @@ bit-for-bit under the same dependency versions:
 ```bash
 ferrumize figures
 ```
+
+> **`ferrumize: command not found`?** Install it once from the repo root:
+> `uv tool install -e . --with streamlit`. Already installed but still not
+> found? Make sure `~/.local/bin` is on your `PATH`, or run
+> `source .venv/bin/activate` before the command (requires `uv sync`).
 
 Individual figures can be generated with:
 
@@ -718,6 +768,11 @@ Run the complete suite with:
 ferrumize verify
 ```
 
+> **`ferrumize: command not found`?** Install it once from the repo root:
+> `uv tool install -e . --with streamlit`. Already installed but still not
+> found? Make sure `~/.local/bin` is on your `PATH`, or run
+> `source .venv/bin/activate` before the command (requires `uv sync`).
+
 Each gate is implemented as an independent script under
 [`verification/`](verification/).
 
@@ -768,6 +823,11 @@ ferrumize verify
 
 ferrumize figures
 ```
+
+> **`ferrumize: command not found`?** Install it once from the repo root:
+> `uv tool install -e . --with streamlit`. Already installed but still not
+> found? Make sure `~/.local/bin` is on your `PATH`, or run
+> `source .venv/bin/activate` before the command (requires `uv sync`).
 
 The canonical figures use a fixed random seed and are byte-stable under the
 same dependency versions.

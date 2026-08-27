@@ -4,9 +4,45 @@ All notable changes to Ferrumizer are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and semantic
 versioning. Entries are grouped by **Added / Changed / Fixed / Removed**.
 
-## [Unreleased] — review-2 + review-3 hardening pass
+## [Unreleased] — review-2/3 hardening, R2 polish, interactive charts, docs & install path
 
 ### Added
+
+- **`ferrumize verify --fast`** — runs the 11 fast gates and skips the two long
+  ones (V6 recovery ~20 min, V7 200-sim SBC ~4 h) so a full check completes in
+  minutes; CI runs this. The full `ferrumize verify` remains the
+  research-grade check; no threshold is loosened, the two gates are simply
+  skipped.
+- **Interactive Plotly charts in the app** — all line/profile/PPC/residual
+  charts converted matplotlib → Plotly (drag = pan, pinch = zoom, tap = hover
+  value, bottom legend, standard modebar). The Case-Depth Dial intentionally
+  stays matplotlib (same semicircle format as the CCT diagram, via `st.pyplot`).
+- **Log Ingestion tab: "Run emulation with this schedule"** — an ingested PLC
+  trajectory now drives the forward model end-to-end. Traverse-only files
+  (depth vs hardness) get an explicit note pointing to the Cycle Predictor tab
+  for calibration instead of a dead end.
+- **`ferrumize figures --config C.yaml [--seed N]`** — the process-showcase
+  figures (F1/F6/F10) now render any alloy/schedule using the same config
+  machinery as `simulate`/`calibrate`. The seven solver-validation figures
+  (F2, F3, F4, F5, F7, F8, F9) stay fixed by design; the README documents the
+  distinction.
+- **`docs/reproducing.md`** — the single "recreate everything" reference:
+  requirements and pins, the 6-command recipe, a full command table with
+  measured wall times and peak RSS, per-figure timings, figure and data
+  regeneration, the app feature list, and pitfalls. Every number is a measured
+  process cost, not an estimate.
+- **`docs/design-rationale.md`** — a plain-language design rationale written
+  for a reviewer with no metallurgy background: the project in one paragraph,
+  a 25-term glossary, what a Tesseract is, a component-by-component table of
+  how the three stages disagree (FD vs AD vs FD), the evidence gates
+  (V4/V4c/V5) that prove it, why Tesseract is load-bearing, both gradient
+  workflows, how to check every claim, the non-claims, and each design
+  decision with its reason.
+- **Tesseract hackathon banner + component-description footer in the app** —
+  "Built with Tesseract for the Tesseract Hackathon 2026 — Pasteur Labs / ISI,
+  Track 04 (cross-track 02)" under the title, and a footer describing the three
+  components (thermal JAX / carburizing legacy NumPy FD / hardening JAX) with
+  the end-to-end gradient flow.
 
 - **V8 Jominy end-quench gate** (`verification/v8_jominy.py`) — a 25 × 100 mm
   rod is end-quenched and the predicted hardness profile is compared against
@@ -38,6 +74,42 @@ versioning. Entries are grouped by **Added / Changed / Fixed / Removed**.
   RDP compression, rows_used, range validation, trajectory→scenario).
 
 ### Changed
+
+- **App alloy dropdown shows descriptors** — options now read e.g. "8620 —
+  low-alloy steel (axles, gears)" via `format_func`; the underlying short keys
+  and `load_alloy` are unchanged. AppTest verified 0 exceptions.
+- **README rebuilt for plain-language clarity** — a plain-language opening
+  paragraph before the technical one, a 10-term glossary section with TOC entry,
+  the FD/AD disagreement stated up-front at the top of the Architecture section
+  (two container boundaries, tested by V4/V4c), and prominent links to
+  `design-rationale.md` (top callout + TOC + Documentation list).
+- **`ferrumize` install path** — the quickstart now installs the CLI with
+  `uv tool install -e . --with streamlit` as its first command, which puts
+  `ferrumize` on `PATH` in every shell with no venv activation (`-e` keeps the
+  repo editable; `--with streamlit` pulls the app extra). `make data` is no
+  longer in the quickstart (the synthetic datasets are committed); the
+  `source .venv/bin/activate` fallback is documented, and a short
+  "command not found" note with the exact install line now sits after the
+  command blocks in README, `reproducing.md`, `calibration.md`, `design.md`,
+  and `ingestion.md`.
+- **`uv.lock` synced to pyproject** — the lockfile was stale: it still listed
+  `ferrumizer 0.1.0` and was missing `plotly>=5.18`, which `streamlit_app.py`
+  has imported since the Plotly chart conversion. `uv sync` regenerated it.
+- **V7 SBC configuration and prior** — `C_pot` prior box narrowed to the
+  validated 0.8–1.2 window (widening to 0.6–1.4 was tested and made the SBC
+  worse: p 0.074 → 0.000, coverage 0.83 → 0.73, ranks skewing to the top bin —
+  the extra width puts truth draws in unidentifiable regions, documented in the
+  gate); `N_WARMUP` 200 → 300, `target_accept_prob` 0.8 → 0.9,
+  `MAX_TREE_DEPTH` 6 → 8. Final state on the R2 tree: rank-uniformity passes
+  (p = 0.074) while 90% coverage sits at 0.83 vs the 0.858 binomial floor —
+  recorded as a known, documented limitation rather than a loosened gate.
+- **V8 reference traverse regenerated** — `data/literature/aisi_8620/
+  traverse.csv` rebuilt on the final R2 physics tree (the committed file
+  predated the rework).
+- **All ten figures regenerated** from the current physics tree — the committed
+  set predated the R2 rework; F6/F7/F8/F9/F10 changed, F1–F5 unaffected.
+- **Calibration config note** — `calibration.md` documents that the YAML finds
+  its traverse CSVs relative to the YAML's own directory.
 
 - **Unified forward paths** — `fast_forward` (calibration) now runs the
   SAME spatial quench + per-depth phase-fraction path as `pipeline.forward`;

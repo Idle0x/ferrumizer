@@ -74,6 +74,7 @@ peak at ~2 GB.
 ```bash
 git clone https://github.com/Idle0x/ferrumizer.git
 cd ferrumizer
+uv tool install -e . --with streamlit   # `ferrumize` on PATH, no activation
 uv sync --extra app --extra dev --extra docs
 make test                     # 49 tests, ~10 min (several run full NUTS calibrations)
 ferrumize verify --fast       # 11 gates, ~4 min — what CI runs
@@ -85,6 +86,11 @@ ferrumize verify              # all 13 gates incl. V6 + V7, ~4 h on CPU
 ferrumize figures             # regenerate all 10 figures, ~28 min (measured)
 ferrumize app                 # launch the Virtual Furnace on :8501
 ```
+
+> **`ferrumize: command not found`?** Install it once from the repo root:
+> `uv tool install -e . --with streamlit`. Already installed but still not
+> found? Make sure `~/.local/bin` is on your `PATH`, or run
+> `source .venv/bin/activate` before the command (requires `uv sync`).
 
 That's the whole recipe. `ferrumize verify` exits non-zero on any FAIL, so it
 is also your go/no-go signal: exit 0 means the tree you just cloned behaves
