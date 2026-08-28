@@ -424,6 +424,10 @@ components.
 
 ## Capabilities
 
+For the full command reference — setup, real usage examples, expectations,
+and error behavior for every command — see
+[docs/commands.md](docs/commands.md).
+
 | Command | Description |
 |---|---|
 | `ferrumize simulate CONFIG` | Run the forward pipeline for a scenario and write temperature, carbon, hardness, and ECD results. |
